@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF a Imagen - 100% Cliente</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="brand">
+                <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                <h1>PDF a Imagen</h1>
+            </div>
+            <p class="tagline">Conversión 100% privada. Nada se sube a ningún servidor.</p>
+        </header>
+
+        <main>
+            <!-- Zona de carga -->
+            <section class="upload-section" id="uploadSection">
+                <div class="drop-zone" id="dropZone">
+                    <input type="file" id="fileInput" accept=".pdf" hidden>
+                    <div class="drop-content">
+                        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <p class="drop-title">Arrastra un PDF aquí</p>
+                        <p class="drop-hint">o haz clic para seleccionar · Máx. recomendado 50MB</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Panel de opciones -->
+            <section class="options-section" id="optionsSection" style="display:none;">
+                <div class="file-bar">
+                    <div class="file-meta">
+                        <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span class="file-name" id="fileName">documento.pdf</span>
+                        <span class="file-pages" id="filePages">0 páginas</span>
+                    </div>
+                    <button class="btn-icon" id="removeFile" title="Cambiar archivo">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="field">
+                        <label>Formato</label>
+                        <div class="segmented" id="formatSelector">
+                            <button class="segment active" data-value="png">PNG</button>
+                            <button class="segment" data-value="jpeg">JPEG</button>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label for="qualityRange">Calidad JPEG</label>
+                        <div class="range-wrap">
+                            <input type="range" id="qualityRange" min="10" max="100" value="90" disabled>
+                            <span class="range-value" id="qualityValue">90%</span>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label for="scaleSelect">Resolución</label>
+                        <select id="scaleSelect">
+                            <option value="1">1× (72 DPI aprox)</option>
+                            <option value="2" selected>2× (144 DPI aprox)</option>
+                            <option value="3">3× (216 DPI aprox)</option>
+                            <option value="4">4× (288 DPI aprox)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button class="btn-primary" id="convertBtn">
+                        <span class="btn-label">Convertir páginas</span>
+                        <span class="btn-spinner" style="display:none;">
+                            <svg class="spin" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/>
+                            </svg>
+                            Procesando...
+                        </span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Progreso -->
+            <section class="progress-section" id="progressSection" style="display:none;">
+                <div class="progress-card">
+                    <div class="progress-header">
+                        <span class="progress-title" id="progressTitle">Convirtiendo página 1 de 5</span>
+                        <span class="progress-percent" id="progressPercent">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-fill" id="progressFill" style="width:0%"></div>
+                    </div>
+                    <button class="btn-ghost" id="cancelBtn">Cancelar</button>
+                </div>
+            </section>
+
+            <!-- Resultados -->
+            <section class="results-section" id="resultsSection" style="display:none;">
+                <div class="results-toolbar">
+                    <div class="results-info">
+                        <h2>Conversión lista</h2>
+                        <p id="resultsMeta">5 páginas convertidas</p>
+                    </div>
+                    <button class="btn-secondary" id="downloadZipBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Descargar ZIP
+                    </button>
+                </div>
+
+                <div class="pages-list" id="pagesList"></div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <p>Todo el procesamiento ocurre en tu navegador. Tus archivos nunca salen de tu dispositivo.</p>
+        </footer>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- Librerías CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
