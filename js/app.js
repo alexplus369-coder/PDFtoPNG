@@ -130,7 +130,7 @@
     }
 
     // ============================================================
-    // 2. MODO: IMAGEN → PDF
+    // 2. MODO: IMAGEN → PDF (Ordenado de menor a mayor)
     // ============================================================
     const dropZoneImg = $('#dropZoneImg');
     const fileInputImg = $('#fileInputImg');
@@ -180,6 +180,9 @@
             return;
         }
 
+        // Ordenar alfanuméricamente de menor a mayor (ej. img_1, img_2, img_10)
+        valid.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
         valid.forEach(file => {
             const id = 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             const url = URL.createObjectURL(file);
@@ -199,9 +202,33 @@
             div.innerHTML = `
                 <img src="${item.url}" class="queue-thumb" style="width:40px;height:40px;object-fit:cover;border-radius:4px;">
                 <span class="queue-name" style="flex:1;margin-left:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.file.name}</span>
-                <button class="queue-btn delete" data-id="${item.id}" style="background:#ef4444;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">✕</button>
+                <div style="display:flex;gap:4px;">
+                    <button class="queue-btn up" data-idx="${index}" ${index === 0 ? 'disabled' : ''} style="background:var(--surface-hover);color:var(--text);border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">↑</button>
+                    <button class="queue-btn down" data-idx="${index}" ${index === imageFiles.length - 1 ? 'disabled' : ''} style="background:var(--surface-hover);color:var(--text);border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">↓</button>
+                    <button class="queue-btn delete" data-id="${item.id}" style="background:#ef4444;color:#fff;border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">✕</button>
+                </div>
             `;
             imageQueue.appendChild(div);
+        });
+
+        imageQueue.querySelectorAll('.up').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                if (idx > 0) {
+                    [imageFiles[idx], imageFiles[idx - 1]] = [imageFiles[idx - 1], imageFiles[idx]];
+                    renderImageQueue();
+                }
+            });
+        });
+
+        imageQueue.querySelectorAll('.down').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                if (idx < imageFiles.length - 1) {
+                    [imageFiles[idx], imageFiles[idx + 1]] = [imageFiles[idx + 1], imageFiles[idx]];
+                    renderImageQueue();
+                }
+            });
         });
 
         imageQueue.querySelectorAll('.delete').forEach(btn => {
@@ -296,7 +323,7 @@
     }
 
     // ============================================================
-    // 3. MODO: UNIR PDF (MERGE)
+    // 3. MODO: UNIR PDF (MERGE) - Ordenado de menor a mayor
     // ============================================================
     const dropZoneMerge = $('#dropZoneMerge'), fileInputMerge = $('#fileInputMerge');
     const optionsSectionMerge = $('#optionsSectionMerge'), mergeQueue = $('#mergeQueue'), convertBtnMerge = $('#convertBtnMerge');
@@ -305,28 +332,86 @@
     if (dropZoneMerge && fileInputMerge) {
         dropZoneMerge.addEventListener('click', () => fileInputMerge.click());
         fileInputMerge.addEventListener('change', (e) => {
-            mergeFiles = Array.from(e.target.files);
+            const valid = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+            if (!valid.length) return showToast('Selecciona archivos PDF válidos', 'error');
+            
+            // Ordenar de menor a mayor por nombre
+            valid.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+            mergeFiles = mergeFiles.concat(valid);
+
             if (mergeFiles.length) {
                 if (optionsSectionMerge) optionsSectionMerge.style.display = 'block';
-                if (mergeQueue) mergeQueue.innerHTML = mergeFiles.map(f => `<div class="queue-item"><span class="queue-name">${f.name}</span></div>`).join('');
+                renderMergeQueue();
             }
+        });
+    }
+
+    function renderMergeQueue() {
+        if (!mergeQueue) return;
+        mergeQueue.innerHTML = '';
+        mergeFiles.forEach((file, index) => {
+            const div = document.createElement('div');
+            div.className = 'queue-item';
+            div.innerHTML = `
+                <span class="queue-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${file.name}">${file.name}</span>
+                <span class="queue-size" style="margin-right:10px;color:var(--text-secondary);">${formatBytes(file.size)}</span>
+                <div style="display:flex;gap:4px;">
+                    <button class="queue-btn up" data-idx="${index}" ${index === 0 ? 'disabled' : ''} style="background:var(--surface-hover);color:var(--text);border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">↑</button>
+                    <button class="queue-btn down" data-idx="${index}" ${index === mergeFiles.length - 1 ? 'disabled' : ''} style="background:var(--surface-hover);color:var(--text);border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">↓</button>
+                    <button class="queue-btn delete" data-idx="${index}" style="background:#ef4444;color:#fff;border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">✕</button>
+                </div>
+            `;
+            mergeQueue.appendChild(div);
+        });
+
+        mergeQueue.querySelectorAll('.up').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                if (idx > 0) {
+                    [mergeFiles[idx], mergeFiles[idx - 1]] = [mergeFiles[idx - 1], mergeFiles[idx]];
+                    renderMergeQueue();
+                }
+            });
+        });
+
+        mergeQueue.querySelectorAll('.down').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                if (idx < mergeFiles.length - 1) {
+                    [mergeFiles[idx], mergeFiles[idx + 1]] = [mergeFiles[idx + 1], mergeFiles[idx]];
+                    renderMergeQueue();
+                }
+            });
+        });
+
+        mergeQueue.querySelectorAll('.delete').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                mergeFiles.splice(idx, 1);
+                renderMergeQueue();
+                if (mergeFiles.length === 0 && optionsSectionMerge) optionsSectionMerge.style.display = 'none';
+            });
         });
     }
 
     if (convertBtnMerge) {
         convertBtnMerge.addEventListener('click', async () => {
             if (!mergeFiles.length) return;
-            showToast('Uniendo PDFs...');
-            const mergedPdf = await PDFLib.PDFDocument.create();
-            for (let file of mergeFiles) {
-                const arrayBuffer = await file.arrayBuffer();
-                const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
-                const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-                copiedPages.forEach(page => mergedPdf.addPage(page));
+            showToast('Uniendo PDFs en el orden seleccionado...');
+            try {
+                const mergedPdf = await PDFLib.PDFDocument.create();
+                for (let file of mergeFiles) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
+                    const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                    copiedPages.forEach(page => mergedPdf.addPage(page));
+                }
+                const pdfBytes = await mergedPdf.save();
+                saveAs(new Blob([pdfBytes], { type: 'application/pdf' }), 'documento-unido.pdf');
+                showToast('¡PDF unido con éxito!', 'success');
+            } catch (err) {
+                showToast('Error al unir los PDFs', 'error');
             }
-            const pdfBytes = await mergedPdf.save();
-            saveAs(new Blob([pdfBytes], { type: 'application/pdf' }), 'documento-unido.pdf');
-            showToast('¡PDF unido con éxito!', 'success');
         });
     }
 
@@ -352,27 +437,31 @@
         convertBtnSplit.addEventListener('click', async () => {
             if (!splitFile) return;
             showToast('Dividiendo PDF en páginas...');
-            const arrayBuffer = await splitFile.arrayBuffer();
-            const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
-            const zip = new JSZip();
-            const numPages = pdf.getPageCount();
+            try {
+                const arrayBuffer = await splitFile.arrayBuffer();
+                const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
+                const zip = new JSZip();
+                const numPages = pdf.getPageCount();
 
-            for (let i = 0; i < numPages; i++) {
-                const subPdf = await PDFLib.PDFDocument.create();
-                const [copiedPage] = await subPdf.copyPages(pdf, [i]);
-                subPdf.addPage(copiedPage);
-                const bytes = await subPdf.save();
-                zip.file(`pagina-${i + 1}.pdf`, bytes);
+                for (let i = 0; i < numPages; i++) {
+                    const subPdf = await PDFLib.PDFDocument.create();
+                    const [copiedPage] = await subPdf.copyPages(pdf, [i]);
+                    subPdf.addPage(copiedPage);
+                    const bytes = await subPdf.save();
+                    zip.file(`pagina-${i + 1}.pdf`, bytes);
+                }
+
+                const content = await zip.generateAsync({ type: 'blob' });
+                saveAs(content, 'pdf-dividido.zip');
+                showToast('¡PDF dividido y comprimido!', 'success');
+            } catch (err) {
+                showToast('Error al dividir el PDF', 'error');
             }
-
-            const content = await zip.generateAsync({ type: 'blob' });
-            saveAs(content, 'pdf-dividido.zip');
-            showToast('¡PDF dividido y comprimido!', 'success');
         });
     }
 
     // ============================================================
-    // 5. MODO: RENOMBRAR ARCHIVOS
+    // 5. MODO: RENOMBRAR ARCHIVOS - Ordenado de menor a mayor
     // ============================================================
     const dropZoneRename = $('#dropZoneRename'), fileInputRename = $('#fileInputRename');
     const optionsSectionRename = $('#optionsSectionRename'), renameQueue = $('#renameQueue'), renamePrefix = $('#renamePrefix'), convertBtnRename = $('#convertBtnRename');
@@ -381,7 +470,13 @@
     if (dropZoneRename && fileInputRename) {
         dropZoneRename.addEventListener('click', () => fileInputRename.click());
         fileInputRename.addEventListener('change', (e) => {
-            renameFiles = Array.from(e.target.files);
+            const valid = Array.from(e.target.files);
+            if (!valid.length) return;
+            
+            // Ordenar de menor a mayor por nombre
+            valid.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+            renameFiles = renameFiles.concat(valid);
+
             if (renameFiles.length) {
                 if (optionsSectionRename) optionsSectionRename.style.display = 'block';
                 renderRenameQueue();
@@ -393,12 +488,53 @@
     function renderRenameQueue() {
         if (!renameQueue) return;
         const prefix = renamePrefix ? renamePrefix.value || 'archivo_' : 'archivo_';
-        renameQueue.innerHTML = renameFiles.map((f, idx) => `
-            <div class="queue-item">
-                <span class="queue-name">${f.name}</span>
-                <span class="queue-newname">➔ ${prefix}${idx + 1}.${f.name.split('.').pop()}</span>
-            </div>
-        `).join('');
+        renameQueue.innerHTML = '';
+        renameFiles.forEach((file, index) => {
+            const ext = file.name.split('.').pop();
+            const div = document.createElement('div');
+            div.className = 'queue-item';
+            div.innerHTML = `
+                <div style="flex:1;overflow:hidden;margin-right:10px;">
+                    <span class="queue-name" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${file.name}">${file.name}</span>
+                    <span class="queue-newname" style="display:block;font-size:0.75rem;color:var(--primary);">➔ ${prefix}${index + 1}.${ext}</span>
+                </div>
+                <div style="display:flex;gap:4px;">
+                    <button class="queue-btn up" data-idx="${index}" ${index === 0 ? 'disabled' : ''} style="background:var(--surface-hover);color:var(--text);border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">↑</button>
+                    <button class="queue-btn down" data-idx="${index}" ${index === renameFiles.length - 1 ? 'disabled' : ''} style="background:var(--surface-hover);color:var(--text);border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">↓</button>
+                    <button class="queue-btn delete" data-idx="${index}" style="background:#ef4444;color:#fff;border:none;width:28px;height:28px;border-radius:4px;cursor:pointer;">✕</button>
+                </div>
+            `;
+            renameQueue.appendChild(div);
+        });
+
+        renameQueue.querySelectorAll('.up').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                if (idx > 0) {
+                    [renameFiles[idx], renameFiles[idx - 1]] = [renameFiles[idx - 1], renameFiles[idx]];
+                    renderRenameQueue();
+                }
+            });
+        });
+
+        renameQueue.querySelectorAll('.down').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                if (idx < renameFiles.length - 1) {
+                    [renameFiles[idx], renameFiles[idx + 1]] = [renameFiles[idx + 1], renameFiles[idx]];
+                    renderRenameQueue();
+                }
+            });
+        });
+
+        renameQueue.querySelectorAll('.delete').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                renameFiles.splice(idx, 1);
+                renderRenameQueue();
+                if (renameFiles.length === 0 && optionsSectionRename) optionsSectionRename.style.display = 'none';
+            });
+        });
     }
 
     if (convertBtnRename) {
