@@ -1,5 +1,4 @@
 (() => {
-    // ===================== UTILIDADES =====================
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
     const toastEl = $('#toast');
@@ -21,576 +20,292 @@
 
     // ===================== CAMBIO DE MODO =====================
     const modeBtns = $$('.mode-btn');
-
     modeBtns.forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             const clickedBtn = e.currentTarget;
             const targetMode = clickedBtn.dataset.mode;
 
-            // 1. Quitar clase active a todos los botones y dársela al presionado
             modeBtns.forEach(b => b.classList.remove('active'));
             clickedBtn.classList.add('active');
 
-            // 2. Ocultar todos los paneles principales dentro de <main>
             const mainPanels = document.querySelectorAll('main > div');
-            mainPanels.forEach(panel => {
-                panel.style.display = 'none';
-            });
+            mainPanels.forEach(panel => panel.style.display = 'none');
 
-            // 3. Determinar el ID exacto del panel a mostrar
-            let targetPanelId = '';
-            if (targetMode === 'pdf2img') targetPanelId = 'pdf2imgPanel';
-            else if (targetMode === 'img2pdf') targetPanelId = 'img2pdfPanel';
+            let targetPanelId = 'pdf2imgPanel';
+            if (targetMode === 'img2pdf') targetPanelId = 'img2pdfPanel';
             else if (targetMode === 'mergepdf') targetPanelId = 'mergePdfPanel';
             else if (targetMode === 'splitpdf') targetPanelId = 'splitPdfPanel';
             else if (targetMode === 'renamefiles') targetPanelId = 'renameFilesPanel';
             else if (targetMode === 'word2pdf') targetPanelId = 'word2pdfPanel';
             else if (targetMode === 'pdf2word') targetPanelId = 'pdf2wordPanel';
 
-            // 4. Mostrar el panel correspondiente si existe
             const activePanel = document.getElementById(targetPanelId);
-            if (activePanel) {
-                activePanel.style.display = 'block';
-            }
+            if (activePanel) activePanel.style.display = 'block';
         });
     });
 
     // ============================================================
-    // ===================== MODO PDF → IMAGEN =====================
+    // 1. MODO: PDF → IMAGEN
     // ============================================================
-    const dropZonePdf = $('#dropZonePdf');
-    const fileInputPdf = $('#fileInputPdf');
-    const uploadSectionPdf = $('#uploadSectionPdf');
-    const optionsSectionPdf = $('#optionsSectionPdf');
-    const progressSectionPdf = $('#progressSectionPdf');
-    const resultsSectionPdf = $('#resultsSectionPdf');
-    const fileNamePdf = $('#fileNamePdf');
-    const filePagesPdf = $('#filePagesPdf');
-    const removeFilePdf = $('#removeFilePdf');
-    const formatSelectorPdf = $('#formatSelectorPdf');
-    const qualityRangePdf = $('#qualityRangePdf');
-    const qualityValuePdf = $('#qualityValuePdf');
-    const scaleSelectPdf = $('#scaleSelectPdf');
-    const convertBtnPdf = $('#convertBtnPdf');
-    const progressTitlePdf = $('#progressTitlePdf');
-    const progressPercentPdf = $('#progressPercentPdf');
-    const progressFillPdf = $('#progressFillPdf');
-    const cancelBtnPdf = $('#cancelBtnPdf');
-    const pagesListPdf = $('#pagesListPdf');
-    const resultsMetaPdf = $('#resultsMetaPdf');
+    const dropZonePdf = $('#dropZonePdf'), fileInputPdf = $('#fileInputPdf');
+    const uploadSectionPdf = $('#uploadSectionPdf'), optionsSectionPdf = $('#optionsSectionPdf');
+    const progressSectionPdf = $('#progressSectionPdf'), resultsSectionPdf = $('#resultsSectionPdf');
+    const fileNamePdf = $('#fileNamePdf'), filePagesPdf = $('#filePagesPdf'), removeFilePdf = $('#removeFilePdf');
+    const formatSelectorPdf = $('#formatSelectorPdf'), qualityRangePdf = $('#qualityRangePdf'), qualityValuePdf = $('#qualityValuePdf');
+    const scaleSelectPdf = $('#scaleSelectPdf'), convertBtnPdf = $('#convertBtnPdf'), pagesListPdf = $('#pagesListPdf');
     const downloadZipBtnPdf = $('#downloadZipBtnPdf');
 
-    let currentPdf = null;
-    let pdfDocument = null;
-    let isConvertingPdf = false;
-    let shouldCancelPdf = false;
-    let convertedPagesPdf = [];
+    let pdfDocument = null, convertedPagesPdf = [];
 
-    if (dropZonePdf && fileInputPdf) {
+    if (dropZonePdf) {
         dropZonePdf.addEventListener('click', () => fileInputPdf.click());
-        fileInputPdf.addEventListener('change', (e) => {
-            if (e.target.files[0]) handlePdfFile(e.target.files[0]);
-        });
-
-        dropZonePdf.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZonePdf.classList.add('dragover');
-        });
-        dropZonePdf.addEventListener('dragleave', () => dropZonePdf.classList.remove('dragover'));
-        dropZonePdf.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZonePdf.classList.remove('dragover');
-            const f = e.dataTransfer.files[0];
-            if (f && f.type === 'application/pdf') handlePdfFile(f);
-            else showToast('Solo se permiten archivos PDF', 'error');
-        });
+        fileInputPdf.addEventListener('change', (e) => { if (e.target.files[0]) handlePdfFile(e.target.files[0]); });
     }
-
+    if (removeFilePdf) removeFilePdf.addEventListener('click', () => { uploadSectionPdf.style.display='block'; optionsSectionPdf.style.display='none'; });
+    if (qualityRangePdf) qualityRangePdf.addEventListener('input', (e) => qualityValuePdf.textContent = e.target.value + '%');
     if (formatSelectorPdf) {
         formatSelectorPdf.querySelectorAll('.segment').forEach(btn => {
             btn.addEventListener('click', () => {
                 formatSelectorPdf.querySelectorAll('.segment').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                const isJpeg = btn.dataset.value === 'jpeg';
-                qualityRangePdf.disabled = !isJpeg;
-                qualityValuePdf.textContent = isJpeg ? qualityRangePdf.value + '%' : '100%';
+                qualityRangePdf.disabled = btn.dataset.value !== 'jpeg';
             });
         });
     }
-
-    if (qualityRangePdf) {
-        qualityRangePdf.addEventListener('input', (e) => {
-            qualityValuePdf.textContent = e.target.value + '%';
-        });
-    }
-
-    if (removeFilePdf) removeFilePdf.addEventListener('click', resetPdfMode);
-    if (convertBtnPdf) convertBtnPdf.addEventListener('click', startPdfConversion);
-    if (cancelBtnPdf) cancelBtnPdf.addEventListener('click', () => {
-        shouldCancelPdf = true;
-        showToast('Cancelando...');
-    });
-    if (downloadZipBtnPdf) downloadZipBtnPdf.addEventListener('click', downloadPdfZip);
 
     async function handlePdfFile(file) {
-        if (file.type !== 'application/pdf') {
-            showToast('El archivo no es un PDF válido', 'error');
-            return;
-        }
-        currentPdf = file;
+        if (file.type !== 'application/pdf') return showToast('No es un PDF válido', 'error');
         fileNamePdf.textContent = file.name;
-
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            pdfDocument = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            filePagesPdf.textContent = `${pdfDocument.numPages} página${pdfDocument.numPages !== 1 ? 's' : ''}`;
-
-            if (pdfDocument.numPages > 100) {
-                showToast('PDF muy grande. La conversión puede tardar.', 'warning');
-            }
-
-            uploadSectionPdf.style.display = 'none';
-            optionsSectionPdf.style.display = 'block';
-            resultsSectionPdf.style.display = 'none';
-            progressSectionPdf.style.display = 'none';
-        } catch (err) {
-            showToast('No se pudo leer el PDF', 'error');
-        }
+        const buffer = await file.arrayBuffer();
+        pdfDocument = await pdfjsLib.getDocument({ data: buffer }).promise;
+        filePagesPdf.textContent = `${pdfDocument.numPages} páginas`;
+        uploadSectionPdf.style.display = 'none';
+        optionsSectionPdf.style.display = 'block';
     }
 
-    async function startPdfConversion() {
-        if (!pdfDocument || isConvertingPdf) return;
+    if (convertBtnPdf) {
+        convertBtnPdf.addEventListener('click', async () => {
+            if (!pdfDocument) return;
+            optionsSectionPdf.style.display = 'none';
+            progressSectionPdf.style.display = 'block';
+            const scale = parseFloat(scaleSelectPdf.value);
+            const format = formatSelectorPdf.querySelector('.segment.active').dataset.value;
+            const quality = parseInt(qualityRangePdf.value) / 100;
+            const zip = new JSZip();
+            convertedPagesPdf = [];
 
-        const format = formatSelectorPdf.querySelector('.segment.active').dataset.value;
-        const quality = parseInt(qualityRangePdf.value) / 100;
-        const scale = parseFloat(scaleSelectPdf.value);
-        const total = pdfDocument.numPages;
-
-        isConvertingPdf = true;
-        shouldCancelPdf = false;
-        convertedPagesPdf = [];
-
-        optionsSectionPdf.style.display = 'none';
-        progressSectionPdf.style.display = 'block';
-        resultsSectionPdf.style.display = 'none';
-        setPdfProgress(0, `Preparando ${total} páginas...`);
-
-        const btnLabel = convertBtnPdf.querySelector('.btn-label');
-        const btnSpinner = convertBtnPdf.querySelector('.btn-spinner');
-        btnLabel.style.display = 'none';
-        btnSpinner.style.display = 'inline-flex';
-        convertBtnPdf.disabled = true;
-
-        const zip = new JSZip();
-        const folder = zip.folder("imagenes");
-
-        try {
-            for (let i = 1; i <= total; i++) {
-                if (shouldCancelPdf) throw new Error('Cancelado');
-
-                setPdfProgress(((i - 1) / total) * 100, `Convirtiendo página ${i} de ${total}...`);
-
+            for (let i = 1; i <= pdfDocument.numPages; i++) {
                 const page = await pdfDocument.getPage(i);
                 const viewport = page.getViewport({ scale });
-
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-
-                if (format === 'jpeg') {
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                }
-
+                canvas.width = viewport.width; canvas.height = viewport.height;
+                if (format === 'jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); }
                 await page.render({ canvasContext: ctx, viewport }).promise;
-
-                const blob = await new Promise((resolve) => {
-                    canvas.toBlob(resolve, `image/${format}`, format === 'jpeg' ? quality : undefined);
-                });
-
+                const blob = await new Promise(res => canvas.toBlob(res, `image/${format}`, quality));
                 const url = URL.createObjectURL(blob);
                 convertedPagesPdf.push({ blob, url, pageNum: i, format });
-
-                const ext = format === 'jpeg' ? 'jpg' : 'png';
-                folder.file(`pagina-${String(i).padStart(3, '0')}.${ext}`, blob);
-
-                page.cleanup();
-                canvas.width = 0;
-                canvas.height = 0;
+                zip.file(`pagina-${String(i).padStart(3, '0')}.${format === 'jpeg' ? 'jpg' : 'png'}`, blob);
             }
 
-            if (shouldCancelPdf) throw new Error('Cancelado');
-
-            setPdfProgress(100, 'Completado');
-            showPdfResults(zip);
-
-        } catch (err) {
-            if (err.message === 'Cancelado') {
-                showToast('Conversión cancelada', 'error');
-            } else {
-                showToast('Error: ' + err.message, 'error');
-            }
-            optionsSectionPdf.style.display = 'block';
             progressSectionPdf.style.display = 'none';
-        } finally {
-            isConvertingPdf = false;
-            btnLabel.style.display = 'inline';
-            btnSpinner.style.display = 'none';
-            convertBtnPdf.disabled = false;
-        }
-    }
-
-    function setPdfProgress(percent, title) {
-        progressFillPdf.style.width = percent + '%';
-        progressPercentPdf.textContent = Math.round(percent) + '%';
-        if (title) progressTitlePdf.textContent = title;
-    }
-
-    function showPdfResults(zip) {
-        progressSectionPdf.style.display = 'none';
-        resultsSectionPdf.style.display = 'block';
-        resultsMetaPdf.textContent = `${convertedPagesPdf.length} página${convertedPagesPdf.length !== 1 ? 's' : ''} convertida${convertedPagesPdf.length !== 1 ? 's' : ''}`;
-
-        pagesListPdf.innerHTML = '';
-        convertedPagesPdf.forEach((page, idx) => {
-            const card = document.createElement('div');
-            card.className = 'page-card';
-            card.innerHTML = `
-                <img src="${page.url}" alt="Página ${page.pageNum}" class="page-thumb" loading="lazy">
-                <div class="page-footer">
-                    <span class="page-num">Página ${page.pageNum}</span>
-                    <button class="page-dl" data-idx="${idx}">Descargar</button>
-                </div>
-            `;
-            pagesListPdf.appendChild(card);
-        });
-
-        pagesListPdf._zip = zip;
-
-        pagesListPdf.querySelectorAll('.page-dl').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const p = convertedPagesPdf[parseInt(btn.dataset.idx)];
-                const ext = p.format === 'jpeg' ? 'jpg' : 'png';
-                saveAs(p.blob, `pagina-${String(p.pageNum).padStart(3, '0')}.${ext}`);
+            resultsSectionPdf.style.display = 'block';
+            pagesListPdf.innerHTML = '';
+            convertedPagesPdf.forEach((p, idx) => {
+                pagesListPdf.innerHTML += `<div class="page-card"><img src="${p.url}" class="page-thumb"><div class="page-footer"><span>Pág ${p.pageNum}</span><button class="page-dl" onclick="saveAs(convertedPagesPdf[${idx}].blob, 'pagina-${p.pageNum}.${p.format}')">Descargar</button></div></div>`;
             });
+            downloadZipBtnPdf.onclick = async () => saveAs(await zip.generateAsync({type:'blob'}), 'pdf-imagenes.zip');
         });
-    }
-
-    async function downloadPdfZip() {
-        const zip = pagesListPdf._zip;
-        if (!zip) return;
-
-        downloadZipBtnPdf.disabled = true;
-        const originalHtml = downloadZipBtnPdf.innerHTML;
-        downloadZipBtnPdf.innerHTML = `<svg class="spin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/></svg> Generando...`;
-
-        try {
-            const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-            saveAs(content, 'pdf-imagenes.zip');
-            showToast('ZIP descargado', 'success');
-        } catch (e) {
-            showToast('Error al generar ZIP', 'error');
-        } finally {
-            downloadZipBtnPdf.disabled = false;
-            downloadZipBtnPdf.innerHTML = originalHtml;
-        }
-    }
-
-    function resetPdfMode() {
-        currentPdf = null;
-        pdfDocument = null;
-        isConvertingPdf = false;
-        shouldCancelPdf = false;
-        convertedPagesPdf.forEach(p => URL.revokeObjectURL(p.url));
-        convertedPagesPdf = [];
-        fileInputPdf.value = '';
-        uploadSectionPdf.style.display = 'block';
-        optionsSectionPdf.style.display = 'none';
-        progressSectionPdf.style.display = 'none';
-        resultsSectionPdf.style.display = 'none';
-        setPdfProgress(0, '');
     }
 
     // ============================================================
-    // ===================== MODO IMAGEN → PDF =====================
+    // 2. MODO: UNIR PDF (MERGE)
     // ============================================================
-    const dropZoneImg = $('#dropZoneImg');
-    const fileInputImg = $('#fileInputImg');
-    const uploadSectionImg = $('#uploadSectionImg');
-    const optionsSectionImg = $('#optionsSectionImg');
-    const progressSectionImg = $('#progressSectionImg');
-    const resultsSectionImg = $('#resultsSectionImg');
-    const fileNameImg = $('#fileNameImg');
-    const removeFileImg = $('#removeFileImg');
-    const imageQueue = $('#imageQueue');
-    const pageSizeSelect = $('#pageSizeSelect');
-    const orientationSelect = $('#orientationSelect');
-    const imgQualityRange = $('#imgQualityRange');
-    const imgQualityValue = $('#imgQualityValue');
-    const convertBtnImg = $('#convertBtnImg');
-    const progressTitleImg = $('#progressTitleImg');
-    const progressPercentImg = $('#progressPercentImg');
-    const progressFillImg = $('#progressFillImg');
-    const resultsMetaImg = $('#resultsMetaImg');
-    const pdfPreviewArea = $('#pdfPreviewArea');
-    const pdfFileName = $('#pdfFileName');
-    const downloadPdfBtn = $('#downloadPdfBtn');
+    const dropZoneMerge = $('#dropZoneMerge'), fileInputMerge = $('#fileInputMerge');
+    const optionsSectionMerge = $('#optionsSectionMerge'), mergeQueue = $('#mergeQueue'), convertBtnMerge = $('#convertBtnMerge');
+    let mergeFiles = [];
 
-    let imageFiles = []; 
-    let isGeneratingPdf = false;
-    let generatedPdfBlob = null;
-
-    if (dropZoneImg && fileInputImg) {
-        dropZoneImg.addEventListener('click', () => fileInputImg.click());
-        fileInputImg.addEventListener('change', (e) => {
-            if (e.target.files.length) handleImageFiles(Array.from(e.target.files));
-        });
-
-        dropZoneImg.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZoneImg.classList.add('dragover');
-        });
-        dropZoneImg.addEventListener('dragleave', () => dropZoneImg.classList.remove('dragover'));
-        dropZoneImg.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZoneImg.classList.remove('dragover');
-            const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-            if (files.length) handleImageFiles(files);
-            else showToast('Solo se permiten imágenes PNG o JPEG', 'error');
+    if (dropZoneMerge) {
+        dropZoneMerge.addEventListener('click', () => fileInputMerge.click());
+        fileInputMerge.addEventListener('change', (e) => {
+            mergeFiles = Array.from(e.target.files);
+            if (mergeFiles.length) {
+                optionsSectionMerge.style.display = 'block';
+                mergeQueue.innerHTML = mergeFiles.map(f => `<div class="queue-item"><span class="queue-name">${f.name}</span></div>`).join('');
+            }
         });
     }
 
-    if (imgQualityRange) {
-        imgQualityRange.addEventListener('input', (e) => {
-            imgQualityValue.textContent = e.target.value + '%';
+    if (convertBtnMerge) {
+        convertBtnMerge.addEventListener('click', async () => {
+            if (!mergeFiles.length) return;
+            showToast('Uniendo PDFs...');
+            const mergedPdf = await PDFLib.PDFDocument.create();
+            for (let file of mergeFiles) {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
+                const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                copiedPages.forEach(page => mergedPdf.addPage(page));
+            }
+            const pdfBytes = await mergedPdf.save();
+            saveAs(new Blob([pdfBytes], { type: 'application/pdf' }), 'documento-unido.pdf');
+            showToast('¡PDF unido con éxito!', 'success');
         });
     }
 
-    if (removeFileImg) removeFileImg.addEventListener('click', resetImgMode);
-    if (convertBtnImg) convertBtnImg.addEventListener('click', startImgToPdf);
+    // ============================================================
+    // 3. MODO: DIVIDIR PDF (SPLIT)
+    // ============================================================
+    const dropZoneSplit = $('#dropZoneSplit'), fileInputSplit = $('#fileInputSplit');
+    const optionsSectionSplit = $('#optionsSectionSplit'), fileNameSplit = $('#fileNameSplit'), convertBtnSplit = $('#convertBtnSplit');
+    let splitFile = null;
 
-    function handleImageFiles(files) {
-        const valid = files.filter(f => f.type === 'image/png' || f.type === 'image/jpeg' || f.type === 'image/jpg');
-        if (!valid.length) {
-            showToast('Solo se permiten imágenes PNG o JPEG', 'error');
-            return;
-        }
-
-        valid.forEach(file => {
-            const id = 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-            const url = URL.createObjectURL(file);
-            imageFiles.push({ file, id, url });
-        });
-
-        renderImageQueue();
-        updateImgUI();
-    }
-
-    function renderImageQueue() {
-        if (!imageQueue) return;
-        imageQueue.innerHTML = '';
-        imageFiles.forEach((item, index) => {
-            const div = document.createElement('div');
-            div.className = 'queue-item';
-            div.dataset.id = item.id;
-            div.innerHTML = `
-                <img src="${item.url}" class="queue-thumb" alt="">
-                <span class="queue-name" title="${item.file.name}">${item.file.name}</span>
-                <span class="queue-size">${formatBytes(item.file.size)}</span>
-                <div class="queue-controls">
-                    <button class="queue-btn" title="Subir" data-action="up" data-id="${item.id}" ${index === 0 ? 'disabled' : ''}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-                    </button>
-                    <button class="queue-btn" title="Bajar" data-action="down" data-id="${item.id}" ${index === imageFiles.length - 1 ? 'disabled' : ''}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-                    <button class="queue-btn delete" title="Eliminar" data-action="delete" data-id="${item.id}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
-                </div>
-            `;
-            imageQueue.appendChild(div);
-        });
-
-        imageQueue.querySelectorAll('.queue-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const action = btn.dataset.action;
-                const id = btn.dataset.id;
-                const idx = imageFiles.findIndex(i => i.id === id);
-
-                if (action === 'up' && idx > 0) {
-                    [imageFiles[idx], imageFiles[idx - 1]] = [imageFiles[idx - 1], imageFiles[idx]];
-                    renderImageQueue();
-                } else if (action === 'down' && idx < imageFiles.length - 1) {
-                    [imageFiles[idx], imageFiles[idx + 1]] = [imageFiles[idx + 1], imageFiles[idx]];
-                    renderImageQueue();
-                } else if (action === 'delete') {
-                    URL.revokeObjectURL(imageFiles[idx].url);
-                    imageFiles.splice(idx, 1);
-                    renderImageQueue();
-                    updateImgUI();
-                }
-            });
+    if (dropZoneSplit) {
+        dropZoneSplit.addEventListener('click', () => fileInputSplit.click());
+        fileInputSplit.addEventListener('change', (e) => {
+            splitFile = e.target.files[0];
+            if (splitFile) {
+                fileNameSplit.textContent = splitFile.name;
+                optionsSectionSplit.style.display = 'block';
+            }
         });
     }
 
-    function updateImgUI() {
-        const count = imageFiles.length;
-        if (count > 0) {
-            fileNameImg.textContent = `${count} imagen${count !== 1 ? 'es' : ''} seleccionada${count !== 1 ? 's' : ''}`;
-            uploadSectionImg.style.display = 'none';
-            optionsSectionImg.style.display = 'block';
-            resultsSectionImg.style.display = 'none';
-            progressSectionImg.style.display = 'none';
-        } else {
-            resetImgMode();
-        }
-    }
+    if (convertBtnSplit) {
+        convertBtnSplit.addEventListener('click', async () => {
+            if (!splitFile) return;
+            showToast('Dividiendo PDF en páginas...');
+            const arrayBuffer = await splitFile.arrayBuffer();
+            const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
+            const zip = new JSZip();
+            const numPages = pdf.getPageCount();
 
-    async function startImgToPdf() {
-        if (!imageFiles.length || isGeneratingPdf) return;
-
-        const pageSize = pageSizeSelect.value;
-        const orientation = orientationSelect.value;
-        const total = imageFiles.length;
-
-        isGeneratingPdf = true;
-
-        optionsSectionImg.style.display = 'none';
-        progressSectionImg.style.display = 'block';
-        resultsSectionImg.style.display = 'none';
-        setImgProgress(0, 'Preparando imágenes...');
-
-        const btnLabel = convertBtnImg.querySelector('.btn-label');
-        const btnSpinner = convertBtnImg.querySelector('.btn-spinner');
-        btnLabel.style.display = 'none';
-        btnSpinner.style.display = 'inline-flex';
-        convertBtnImg.disabled = true;
-
-        try {
-            const { jsPDF } = window.jspdf;
-
-            let pageWidth, pageHeight;
-            const isLandscape = orientation === 'landscape';
-
-            if (pageSize === 'a4') {
-                pageWidth = 210; pageHeight = 297;
-            } else if (pageSize === 'letter') {
-                pageWidth = 215.9; pageHeight = 279.4;
-            } else {
-                pageWidth = 210; pageHeight = 297;
+            for (let i = 0; i < numPages; i++) {
+                const subPdf = await PDFLib.PDFDocument.create();
+                const [copiedPage] = await subPdf.copyPages(pdf, [i]);
+                subPdf.addPage(copiedPage);
+                const bytes = await subPdf.save();
+                zip.file(`pagina-${i + 1}.pdf`, bytes);
             }
 
-            if (isLandscape) [pageWidth, pageHeight] = [pageHeight, pageWidth];
-
-            const doc = new jsPDF({
-                orientation: orientation,
-                unit: 'mm',
-                format: pageSize === 'original' ? [pageWidth, pageHeight] : (pageSize === 'a4' ? 'a4' : 'letter')
-            });
-
-            for (let i = 0; i < total; i++) {
-                setImgProgress((i / total) * 100, `Procesando imagen ${i + 1} de ${total}...`);
-
-                const item = imageFiles[i];
-                const imgData = await fileToBase64(item.file);
-                const dims = await getImageDimensions(imgData);
-                const imgRatio = dims.width / dims.height;
-
-                let pw = doc.internal.pageSize.getWidth();
-                let ph = doc.internal.pageSize.getHeight();
-
-                const margin = 5;
-                const maxW = pw - margin * 2;
-                const maxH = ph - margin * 2;
-
-                let drawW, drawH;
-                const pageRatio = maxW / maxH;
-
-                if (imgRatio > pageRatio) {
-                    drawW = maxW;
-                    drawH = drawW / imgRatio;
-                } else {
-                    drawH = maxH;
-                    drawW = drawH * imgRatio;
-                }
-
-                const x = (pw - drawW) / 2;
-                const y = (ph - drawH) / 2;
-
-                if (i > 0) doc.addPage();
-
-                const imgFormat = item.file.type === 'image/png' ? 'PNG' : 'JPEG';
-                doc.addImage(imgData, imgFormat, x, y, drawW, drawH, undefined, 'FAST');
-            }
-
-            setImgProgress(100, 'Finalizando...');
-
-            generatedPdfBlob = doc.output('blob');
-            progressSectionImg.style.display = 'none';
-            resultsSectionImg.style.display = 'block';
-
-            const baseName = imageFiles.length === 1
-                ? imageFiles[0].file.name.replace(/\.[^/.]+$/, '')
-                : 'imagenes';
-            pdfFileName.textContent = baseName + '.pdf';
-            resultsMetaImg.textContent = `${total} imagen${total !== 1 ? 'es' : ''} en un PDF de ${formatBytes(generatedPdfBlob.size)}`;
-
-            downloadPdfBtn.onclick = () => {
-                saveAs(generatedPdfBlob, baseName + '.pdf');
-            };
-
-            showToast('PDF generado correctamente', 'success');
-
-        } catch (err) {
-            console.error(err);
-            showToast('Error al generar PDF: ' + err.message, 'error');
-            optionsSectionImg.style.display = 'block';
-            progressSectionImg.style.display = 'none';
-        } finally {
-            isGeneratingPdf = false;
-            btnLabel.style.display = 'inline';
-            btnSpinner.style.display = 'none';
-            convertBtnImg.disabled = false;
-        }
-    }
-
-    function setImgProgress(percent, title) {
-        progressFillImg.style.width = percent + '%';
-        progressPercentImg.textContent = Math.round(percent) + '%';
-        if (title) progressTitleImg.textContent = title;
-    }
-
-    function resetImgMode() {
-        imageFiles.forEach(i => URL.revokeObjectURL(i.url));
-        imageFiles = [];
-        generatedPdfBlob = null;
-        fileInputImg.value = '';
-        uploadSectionImg.style.display = 'block';
-        optionsSectionImg.style.display = 'none';
-        progressSectionImg.style.display = 'none';
-        resultsSectionImg.style.display = 'none';
-        setImgProgress(0, '');
-    }
-
-    function fileToBase64(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
+            const content = await zip.generateAsync({ type: 'blob' });
+            saveAs(content, 'pdf-dividido.zip');
+            showToast('¡PDF dividido y comprimido!', 'success');
         });
     }
 
-    function getImageDimensions(dataUrl) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => resolve({ width: img.width, height: img.height });
-            img.onerror = reject;
-            img.src = dataUrl;
+    // ============================================================
+    // 4. MODO: RENOMBRAR ARCHIVOS
+    // ============================================================
+    const dropZoneRename = $('#dropZoneRename'), fileInputRename = $('#fileInputRename');
+    const optionsSectionRename = $('#optionsSectionRename'), renameQueue = $('#renameQueue'), renamePrefix = $('#renamePrefix'), convertBtnRename = $('#convertBtnRename');
+    let renameFiles = [];
+
+    if (dropZoneRename) {
+        dropZoneRename.addEventListener('click', () => fileInputRename.click());
+        fileInputRename.addEventListener('change', (e) => {
+            renameFiles = Array.from(e.target.files);
+            if (renameFiles.length) {
+                optionsSectionRename.style.display = 'block';
+                renderRenameQueue();
+            }
+        });
+    }
+    if (renamePrefix) renamePrefix.addEventListener('input', renderRenameQueue);
+
+    function renderRenameQueue() {
+        const prefix = renamePrefix.value || 'archivo_';
+        renameQueue.innerHTML = renameFiles.map((f, idx) => `
+            <div class="queue-item">
+                <span class="queue-name">${f.name}</span>
+                <span class="queue-newname">➔ ${prefix}${idx + 1}.${f.name.split('.').pop()}</span>
+            </div>
+        `).join('');
+    }
+
+    if (convertBtnRename) {
+        convertBtnRename.addEventListener('click', async () => {
+            const prefix = renamePrefix.value || 'archivo_';
+            const zip = new JSZip();
+            renameFiles.forEach((f, idx) => {
+                const ext = f.name.split('.').pop();
+                zip.file(`${prefix}${idx + 1}.${ext}`, f);
+            });
+            const content = await zip.generateAsync({ type: 'blob' });
+            saveAs(content, 'archivos-renombrados.zip');
+            showToast('¡Archivos renombrados!', 'success');
+        });
+    }
+
+    // ============================================================
+    // 5. MODO: WORD A PDF
+    // ============================================================
+    const dropZoneWord = $('#dropZoneWord'), fileInputWord = $('#fileInputWord');
+    const optionsSectionWord = $('#optionsSectionWord'), fileNameWord = $('#fileNameWord'), convertBtnWord = $('#convertBtnWord');
+    let wordFile = null;
+
+    if (dropZoneWord) {
+        dropZoneWord.addEventListener('click', () => fileInputWord.click());
+        fileInputWord.addEventListener('change', (e) => {
+            wordFile = e.target.files[0];
+            if (wordFile) {
+                fileNameWord.textContent = wordFile.name;
+                optionsSectionWord.style.display = 'block';
+            }
+        });
+    }
+
+    if (convertBtnWord) {
+        convertBtnWord.addEventListener('click', async () => {
+            if (!wordFile) return;
+            showToast('Leyendo archivo Word...');
+            const buffer = await wordFile.arrayBuffer();
+            mammoth.extractRawText({ arrayBuffer: buffer }).then(result => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                const lines = doc.splitTextToSize(result.value, 180);
+                doc.text(lines, 15, 15);
+                doc.save(wordFile.name.replace(/\.[^/.]+$/, '') + '.pdf');
+                showToast('¡Word convertido a PDF!', 'success');
+            }).catch(err => showToast('Error al leer Word', 'error'));
+        });
+    }
+
+    // ============================================================
+    // 6. MODO: PDF A WORD / TEXTO
+    // ============================================================
+    const dropZonePdf2Word = $('#dropZonePdf2Word'), fileInputPdf2Word = $('#fileInputPdf2Word');
+    const optionsSectionPdf2Word = $('#optionsSectionPdf2Word'), fileNamePdf2Word = $('#fileNamePdf2Word'), convertBtnPdf2Word = $('#convertBtnPdf2Word');
+    let pdf2WordFile = null;
+
+    if (dropZonePdf2Word) {
+        dropZonePdf2Word.addEventListener('click', () => fileInputPdf2Word.click());
+        fileInputPdf2Word.addEventListener('change', (e) => {
+            pdf2WordFile = e.target.files[0];
+            if (pdf2WordFile) {
+                fileNamePdf2Word.textContent = pdf2WordFile.name;
+                optionsSectionPdf2Word.style.display = 'block';
+            }
+        });
+    }
+
+    if (convertBtnPdf2Word) {
+        convertBtnPdf2Word.addEventListener('click', async () => {
+            if (!pdf2WordFile) return;
+            showToast('Extrayendo texto del PDF...');
+            const buffer = await pdf2WordFile.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += `--- Página ${i} ---\n\n${pageText}\n\n`;
+            }
+            const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' });
+            saveAs(blob, pdf2WordFile.name.replace(/\.[^/.]+$/, '') + '.doc');
+            showToast('¡Texto extraído con éxito!', 'success');
         });
     }
 })();
