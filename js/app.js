@@ -270,35 +270,16 @@
     if (convertBtnWord) {
         convertBtnWord.addEventListener('click', async () => {
             if (!wordFile) return;
-            showToast('Convirtiendo Word a PDF (multi-página)...');
-            try {
-                const buffer = await wordFile.arrayBuffer();
-                const result = await mammoth.extractRawText({ arrayBuffer: buffer });
-                
+            showToast('Leyendo archivo Word...');
+            const buffer = await wordFile.arrayBuffer();
+            mammoth.extractRawText({ arrayBuffer: buffer }).then(result => {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
-                
-                const pageWidth = 180; // Ancho máximo de texto en mm
-                const pageHeight = 270; // Altura máxima antes de saltar de página
-                let y = 15; // Posición vertical inicial
-                
-                // Dividir el texto en líneas que se ajusten al ancho de la hoja
-                const lines = doc.splitTextToSize(result.value, pageWidth);
-                
-                lines.forEach((line) => {
-                    if (y > pageHeight) {
-                        doc.addPage(); // Crea una nueva hoja automáticamente
-                        y = 15; // Reinicia la posición vertical arriba
-                    }
-                    doc.text(line, 15, y);
-                    y += 7; // Espaciado entre líneas
-                });
-
+                const lines = doc.splitTextToSize(result.value, 180);
+                doc.text(lines, 15, 15);
                 doc.save(wordFile.name.replace(/\.[^/.]+$/, '') + '.pdf');
-                showToast('¡Word convertido con éxito a PDF!', 'success');
-            } catch (err) {
-                showToast('Error al convertir el archivo Word', 'error');
-            }
+                showToast('¡Word convertido a PDF!', 'success');
+            }).catch(err => showToast('Error al leer Word', 'error'));
         });
     }
 
