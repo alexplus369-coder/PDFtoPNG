@@ -130,7 +130,173 @@
     }
 
     // ============================================================
-    // 2. MODO: UNIR PDF (MERGE)
+    // 2. MODO: IMAGEN → PDF
+    // ============================================================
+    const dropZoneImg = $('#dropZoneImg');
+    const fileInputImg = $('#fileInputImg');
+    const uploadSectionImg = $('#uploadSectionImg');
+    const optionsSectionImg = $('#optionsSectionImg');
+    const progressSectionImg = $('#progressSectionImg');
+    const resultsSectionImg = $('#resultsSectionImg');
+    const fileNameImg = $('#fileNameImg');
+    const removeFileImg = $('#removeFileImg');
+    const imageQueue = $('#imageQueue');
+    const pageSizeSelect = $('#pageSizeSelect');
+    const orientationSelect = $('#orientationSelect');
+    const convertBtnImg = $('#convertBtnImg');
+    const pdfFileName = $('#pdfFileName');
+    const downloadPdfBtn = $('#downloadPdfBtn');
+
+    let imageFiles = [];
+    let isGeneratingPdf = false;
+
+    if (dropZoneImg && fileInputImg) {
+        dropZoneImg.addEventListener('click', () => fileInputImg.click());
+        fileInputImg.addEventListener('change', (e) => {
+            if (e.target.files.length) handleImageFiles(Array.from(e.target.files));
+        });
+
+        dropZoneImg.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZoneImg.classList.add('dragover');
+        });
+        dropZoneImg.addEventListener('dragleave', () => dropZoneImg.classList.remove('dragover'));
+        dropZoneImg.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZoneImg.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+            if (files.length) handleImageFiles(files);
+            else showToast('Solo se permiten imágenes válidas', 'error');
+        });
+    }
+
+    if (removeFileImg) removeFileImg.addEventListener('click', resetImgMode);
+    if (convertBtnImg) convertBtnImg.addEventListener('click', startImgToPdf);
+
+    function handleImageFiles(files) {
+        const valid = files.filter(f => f.type.startsWith('image/'));
+        if (!valid.length) {
+            showToast('Selecciona imágenes válidas (PNG, JPG)', 'error');
+            return;
+        }
+
+        valid.forEach(file => {
+            const id = 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const url = URL.createObjectURL(file);
+            imageFiles.push({ file, id, url });
+        });
+
+        renderImageQueue();
+        updateImgUI();
+    }
+
+    function renderImageQueue() {
+        if (!imageQueue) return;
+        imageQueue.innerHTML = '';
+        imageFiles.forEach((item, index) => {
+            const div = document.createElement('div');
+            div.className = 'queue-item';
+            div.innerHTML = `
+                <img src="${item.url}" class="queue-thumb" style="width:40px;height:40px;object-fit:cover;border-radius:4px;">
+                <span class="queue-name" style="flex:1;margin-left:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.file.name}</span>
+                <button class="queue-btn delete" data-id="${item.id}" style="background:#ef4444;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">✕</button>
+            `;
+            imageQueue.appendChild(div);
+        });
+
+        imageQueue.querySelectorAll('.delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = e.currentTarget.dataset.id;
+                const idx = imageFiles.findIndex(i => i.id === id);
+                if (idx !== -1) {
+                    URL.revokeObjectURL(imageFiles[idx].url);
+                    imageFiles.splice(idx, 1);
+                    renderImageQueue();
+                    updateImgUI();
+                }
+            });
+        });
+    }
+
+    function updateImgUI() {
+        const count = imageFiles.length;
+        if (count > 0) {
+            if (fileNameImg) fileNameImg.textContent = `${count} imagen${count !== 1 ? 'es' : ''} seleccionada${count !== 1 ? 's' : ''}`;
+            if (uploadSectionImg) uploadSectionImg.style.display = 'none';
+            if (optionsSectionImg) optionsSectionImg.style.display = 'block';
+        } else {
+            resetImgMode();
+        }
+    }
+
+    async function startImgToPdf() {
+        if (!imageFiles.length || isGeneratingPdf) return;
+        isGeneratingPdf = true;
+
+        if (optionsSectionImg) optionsSectionImg.style.display = 'none';
+        if (progressSectionImg) progressSectionImg.style.display = 'block';
+
+        try {
+            const { jsPDF } = window.jspdf;
+            const pageSize = pageSizeSelect ? pageSizeSelect.value : 'a4';
+            const orientation = orientationSelect ? orientationSelect.value : 'portrait';
+
+            const doc = new jsPDF({
+                orientation: orientation,
+                unit: 'mm',
+                format: pageSize === 'a4' ? 'a4' : 'letter'
+            });
+
+            for (let i = 0; i < imageFiles.length; i++) {
+                if (i > 0) doc.addPage();
+                const item = imageFiles[i];
+                const imgData = await fileToBase64(item.file);
+                
+                const pw = doc.internal.pageSize.getWidth();
+                const ph = doc.internal.pageSize.getHeight();
+                
+                doc.addImage(imgData, 'JPEG', 10, 10, pw - 20, ph - 20, undefined, 'FAST');
+            }
+
+            const pdfBlob = doc.output('blob');
+            if (progressSectionImg) progressSectionImg.style.display = 'none';
+            if (resultsSectionImg) resultsSectionImg.style.display = 'block';
+
+            if (pdfFileName) pdfFileName.textContent = 'imagenes-unidas.pdf';
+            if (downloadPdfBtn) {
+                downloadPdfBtn.onclick = () => saveAs(pdfBlob, 'imagenes-unidas.pdf');
+            }
+            showToast('¡PDF generado con éxito!', 'success');
+        } catch (err) {
+            showToast('Error al generar PDF', 'error');
+            if (optionsSectionImg) optionsSectionImg.style.display = 'block';
+            if (progressSectionImg) progressSectionImg.style.display = 'none';
+        } finally {
+            isGeneratingPdf = false;
+        }
+    }
+
+    function resetImgMode() {
+        imageFiles.forEach(i => URL.revokeObjectURL(i.url));
+        imageFiles = [];
+        if (fileInputImg) fileInputImg.value = '';
+        if (uploadSectionImg) uploadSectionImg.style.display = 'block';
+        if (optionsSectionImg) optionsSectionImg.style.display = 'none';
+        if (progressSectionImg) progressSectionImg.style.display = 'none';
+        if (resultsSectionImg) resultsSectionImg.style.display = 'none';
+    }
+
+    function fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // ============================================================
+    // 3. MODO: UNIR PDF (MERGE)
     // ============================================================
     const dropZoneMerge = $('#dropZoneMerge'), fileInputMerge = $('#fileInputMerge');
     const optionsSectionMerge = $('#optionsSectionMerge'), mergeQueue = $('#mergeQueue'), convertBtnMerge = $('#convertBtnMerge');
@@ -165,7 +331,7 @@
     }
 
     // ============================================================
-    // 3. MODO: DIVIDIR PDF (SPLIT)
+    // 4. MODO: DIVIDIR PDF (SPLIT)
     // ============================================================
     const dropZoneSplit = $('#dropZoneSplit'), fileInputSplit = $('#fileInputSplit');
     const optionsSectionSplit = $('#optionsSectionSplit'), fileNameSplit = $('#fileNameSplit'), convertBtnSplit = $('#convertBtnSplit');
@@ -206,7 +372,7 @@
     }
 
     // ============================================================
-    // 4. MODO: RENOMBRAR ARCHIVOS
+    // 5. MODO: RENOMBRAR ARCHIVOS
     // ============================================================
     const dropZoneRename = $('#dropZoneRename'), fileInputRename = $('#fileInputRename');
     const optionsSectionRename = $('#optionsSectionRename'), renameQueue = $('#renameQueue'), renamePrefix = $('#renamePrefix'), convertBtnRename = $('#convertBtnRename');
@@ -250,7 +416,7 @@
     }
 
     // ============================================================
-    // 5. MODO: WORD A PDF
+    // 6. MODO: WORD A PDF (CON SALTO DE PÁGINA AUTOMÁTICO)
     // ============================================================
     const dropZoneWord = $('#dropZoneWord'), fileInputWord = $('#fileInputWord');
     const optionsSectionWord = $('#optionsSectionWord'), fileNameWord = $('#fileNameWord'), convertBtnWord = $('#convertBtnWord');
@@ -270,21 +436,39 @@
     if (convertBtnWord) {
         convertBtnWord.addEventListener('click', async () => {
             if (!wordFile) return;
-            showToast('Leyendo archivo Word...');
-            const buffer = await wordFile.arrayBuffer();
-            mammoth.extractRawText({ arrayBuffer: buffer }).then(result => {
+            showToast('Convirtiendo Word a PDF...');
+            try {
+                const buffer = await wordFile.arrayBuffer();
+                const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+                
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
-                const lines = doc.splitTextToSize(result.value, 180);
-                doc.text(lines, 15, 15);
+                
+                const pageWidth = 180; 
+                const pageHeight = 270; 
+                let y = 15; 
+                
+                const lines = doc.splitTextToSize(result.value, pageWidth);
+                
+                lines.forEach((line) => {
+                    if (y > pageHeight) {
+                        doc.addPage(); 
+                        y = 15; 
+                    }
+                    doc.text(line, 15, y);
+                    y += 7; 
+                });
+
                 doc.save(wordFile.name.replace(/\.[^/.]+$/, '') + '.pdf');
-                showToast('¡Word convertido a PDF!', 'success');
-            }).catch(err => showToast('Error al leer Word', 'error'));
+                showToast('¡Word convertido con éxito a PDF!', 'success');
+            } catch (err) {
+                showToast('Error al convertir el archivo Word', 'error');
+            }
         });
     }
 
     // ============================================================
-    // 6. MODO: PDF A WORD / TEXTO
+    // 7. MODO: PDF A WORD / TEXTO
     // ============================================================
     const dropZonePdf2Word = $('#dropZonePdf2Word'), fileInputPdf2Word = $('#fileInputPdf2Word');
     const optionsSectionPdf2Word = $('#optionsSectionPdf2Word'), fileNamePdf2Word = $('#fileNamePdf2Word'), convertBtnPdf2Word = $('#convertBtnPdf2Word');
@@ -305,18 +489,22 @@
         convertBtnPdf2Word.addEventListener('click', async () => {
             if (!pdf2WordFile) return;
             showToast('Extrayendo texto del PDF...');
-            const buffer = await pdf2WordFile.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-            let fullText = '';
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                const pageText = textContent.items.map(item => item.str).join(' ');
-                fullText += `--- Página ${i} ---\n\n${pageText}\n\n`;
+            try {
+                const buffer = await pdf2WordFile.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+                let fullText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    const pageText = textContent.items.map(item => item.str).join(' ');
+                    fullText += `--- Página ${i} ---\n\n${pageText}\n\n`;
+                }
+                const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' });
+                saveAs(blob, pdf2WordFile.name.replace(/\.[^/.]+$/, '') + '.doc');
+                showToast('¡Texto extraído con éxito!', 'success');
+            } catch (err) {
+                showToast('Error al extraer texto del PDF', 'error');
             }
-            const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' });
-            saveAs(blob, pdf2WordFile.name.replace(/\.[^/.]+$/, '') + '.doc');
-            showToast('¡Texto extraído con éxito!', 'success');
         });
     }
 })();
