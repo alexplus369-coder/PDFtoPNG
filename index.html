@@ -309,455 +309,51 @@
 
             <!-- ==================== MODO: UNIR PDF ==================== -->
             <div id="mergePdfPanel" style="display:none;">
-                <section class="upload-section" id="uploadSectionMerge">
-                    <div class="drop-zone" id="dropZoneMerge">
-                        <input type="file" id="fileInputMerge" accept=".pdf" multiple hidden>
-                        <div class="drop-content">
-                            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M12 2v14M12 2l-5 5M12 2l5 5"/>
-                                <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
-                            </svg>
-                            <p class="drop-title">Arrastra dos o más PDFs aquí</p>
-                            <p class="drop-hint">o haz clic para seleccionar · Se unirán en el orden mostrado</p>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="options-section" id="optionsSectionMerge" style="display:none;">
-                    <div class="file-bar">
-                        <div class="file-meta">
-                            <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                            <span class="file-name" id="fileNameMerge">0 PDFs seleccionados</span>
-                        </div>
-                        <button class="btn-icon" id="removeFileMerge" title="Limpiar todo">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <div class="image-queue" id="mergeQueue"></div>
-
-                    <div class="actions">
-                        <button class="btn-primary" id="convertBtnMerge">
-                            <span class="btn-label">Unir PDFs</span>
-                            <span class="btn-spinner" style="display:none;">
-                                <svg class="spin" viewBox="0 0 24 24">
-                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/>
-                                </svg>
-                                Uniendo...
-                            </span>
-                        </button>
-                    </div>
-                </section>
-
-                <section class="progress-section" id="progressSectionMerge" style="display:none;">
-                    <div class="progress-card">
-                        <div class="progress-header">
-                            <span class="progress-title" id="progressTitleMerge">Uniendo PDFs...</span>
-                            <span class="progress-percent" id="progressPercentMerge">0%</span>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill" id="progressFillMerge" style="width:0%"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="results-section" id="resultsSectionMerge" style="display:none;">
-                    <div class="results-toolbar">
-                        <div class="results-info">
-                            <h2>PDF unido</h2>
-                            <p id="resultsMetaMerge">Listo para descargar</p>
-                        </div>
-                    </div>
-                    <div class="pdf-preview-area" id="pdfPreviewAreaMerge">
-                        <div class="pdf-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                                <line x1="16" y1="13" x2="8" y2="13"/>
-                                <line x1="16" y1="17" x2="8" y2="17"/>
-                            </svg>
-                        </div>
-                        <p class="pdf-filename" id="mergedFileName">documento-unido.pdf</p>
-                        <button class="btn-primary" id="downloadMergeBtn" style="max-width: 300px;">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Descargar PDF
-                        </button>
+                <section class="upload-section">
+                    <div class="drop-zone">
+                        <p class="drop-title">Panel de Unir PDF en construcción</p>
+                        <p class="drop-hint">Pronto disponible</p>
                     </div>
                 </section>
             </div>
 
             <!-- ==================== MODO: DIVIDIR PDF ==================== -->
             <div id="splitPdfPanel" style="display:none;">
-                <section class="upload-section" id="uploadSectionSplit">
-                    <div class="drop-zone" id="dropZoneSplit">
-                        <input type="file" id="fileInputSplit" accept=".pdf" hidden>
-                        <div class="drop-content">
-                            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M12 22v-14M12 22l-5-5M12 22l5-5"/>
-                                <path d="M4 8V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3"/>
-                            </svg>
-                            <p class="drop-title">Arrastra un PDF aquí</p>
-                            <p class="drop-hint">o haz clic para seleccionar · Máx. recomendado 50MB</p>
-                        </div>
+                <section class="upload-section">
+                    <div class="drop-zone">
+                        <p class="drop-title">Panel de Dividir PDF en construcción</p>
+                        <p class="drop-hint">Pronto disponible</p>
                     </div>
-                </section>
-
-                <section class="options-section" id="optionsSectionSplit" style="display:none;">
-                    <div class="file-bar">
-                        <div class="file-meta">
-                            <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                            <span class="file-name" id="fileNameSplit">documento.pdf</span>
-                            <span class="file-pages" id="filePagesSplit">0 páginas</span>
-                        </div>
-                        <button class="btn-icon" id="removeFileSplit" title="Cambiar archivo">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <div class="settings-grid">
-                        <div class="field">
-                            <label>Modo de división</label>
-                            <div class="segmented" id="splitModeSelector">
-                                <button class="segment active" data-value="all">Página por página</button>
-                                <button class="segment" data-value="range">Rango personalizado</button>
-                            </div>
-                        </div>
-
-                        <div class="field" id="splitRangeField" style="display:none;">
-                            <label for="splitRangeInput">Rangos (ej: 1-3, 5, 7-9)</label>
-                            <input type="text" id="splitRangeInput" placeholder="1-3, 5, 7-9" style="width:100%; padding:0.625rem 0.875rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.9rem; outline:none;">
-                        </div>
-                    </div>
-
-                    <div class="actions">
-                        <button class="btn-primary" id="convertBtnSplit">
-                            <span class="btn-label">Dividir PDF</span>
-                            <span class="btn-spinner" style="display:none;">
-                                <svg class="spin" viewBox="0 0 24 24">
-                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/>
-                                </svg>
-                                Dividiendo...
-                            </span>
-                        </button>
-                    </div>
-                </section>
-
-                <section class="progress-section" id="progressSectionSplit" style="display:none;">
-                    <div class="progress-card">
-                        <div class="progress-header">
-                            <span class="progress-title" id="progressTitleSplit">Dividiendo...</span>
-                            <span class="progress-percent" id="progressPercentSplit">0%</span>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill" id="progressFillSplit" style="width:0%"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="results-section" id="resultsSectionSplit" style="display:none;">
-                    <div class="results-toolbar">
-                        <div class="results-info">
-                            <h2>División lista</h2>
-                            <p id="resultsMetaSplit">0 archivos generados</p>
-                        </div>
-                        <button class="btn-secondary" id="downloadZipBtnSplit">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Descargar ZIP
-                        </button>
-                    </div>
-                    <div class="pages-list" id="filesListSplit"></div>
                 </section>
             </div>
 
-            <!-- ==================== MODO: RENOMBRAR ARCHIVOS ==================== -->
+            <!-- ==================== MODO: RENOMBRAR ==================== -->
             <div id="renameFilesPanel" style="display:none;">
-                <section class="upload-section" id="uploadSectionRename">
-                    <div class="drop-zone" id="dropZoneRename">
-                        <input type="file" id="fileInputRename" accept=".pdf,image/png,image/jpeg" multiple hidden>
-                        <div class="drop-content">
-                            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M12 20h9"/>
-                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-                            </svg>
-                            <p class="drop-title">Arrastra archivos PDF, PNG o JPEG aquí</p>
-                            <p class="drop-hint">o haz clic para seleccionar · Se renombrarán en el orden mostrado</p>
-                        </div>
+                <section class="upload-section">
+                    <div class="drop-zone">
+                        <p class="drop-title">Panel de Renombrar en construcción</p>
+                        <p class="drop-hint">Pronto disponible</p>
                     </div>
-                </section>
-
-                <section class="options-section" id="optionsSectionRename" style="display:none;">
-                    <div class="file-bar">
-                        <div class="file-meta">
-                            <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M12 20h9"/>
-                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-                            </svg>
-                            <span class="file-name" id="fileNameRename">0 archivos seleccionados</span>
-                        </div>
-                        <button class="btn-icon" id="removeFileRename" title="Limpiar todo">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <div class="settings-grid">
-                        <div class="field">
-                            <label for="renamePrefixInput">Nombre general</label>
-                            <input type="text" id="renamePrefixInput" placeholder="Ej: Notas_" value="Notas_" style="width:100%; padding:0.625rem 0.875rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.9rem; outline:none;">
-                        </div>
-
-                        <div class="field">
-                            <label for="renameStartInput">Número inicial</label>
-                            <input type="number" id="renameStartInput" value="0" min="0" style="width:100%; padding:0.625rem 0.875rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.9rem; outline:none;">
-                        </div>
-
-                        <div class="field">
-                            <label for="renamePadSelect">Dígitos</label>
-                            <select id="renamePadSelect">
-                                <option value="1">1 (0, 1, 2...)</option>
-                                <option value="2" selected>2 (00, 01, 02...)</option>
-                                <option value="3">3 (000, 001, 002...)</option>
-                                <option value="4">4 (0000, 0001...)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Lista de archivos con vista previa -->
-                    <div class="image-queue" id="renameQueue"></div>
-
-                    <div class="actions">
-                        <button class="btn-primary" id="convertBtnRename">
-                            <span class="btn-label">Renombrar y descargar</span>
-                            <span class="btn-spinner" style="display:none;">
-                                <svg class="spin" viewBox="0 0 24 24">
-                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/>
-                                </svg>
-                                Procesando...
-                            </span>
-                        </button>
-                    </div>
-                </section>
-
-                <section class="progress-section" id="progressSectionRename" style="display:none;">
-                    <div class="progress-card">
-                        <div class="progress-header">
-                            <span class="progress-title" id="progressTitleRename">Renombrando...</span>
-                            <span class="progress-percent" id="progressPercentRename">0%</span>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill" id="progressFillRename" style="width:0%"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="results-section" id="resultsSectionRename" style="display:none;">
-                    <div class="results-toolbar">
-                        <div class="results-info">
-                            <h2>Archivos renombrados</h2>
-                            <p id="resultsMetaRename">0 archivos listos</p>
-                        </div>
-                        <button class="btn-secondary" id="downloadZipBtnRename">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Descargar ZIP
-                        </button>
-                    </div>
-                    <div class="pages-list" id="filesListRename"></div>
                 </section>
             </div>
 
             <!-- ==================== MODO: WORD A PDF ==================== -->
             <div id="word2pdfPanel" style="display:none;">
-                <section class="upload-section" id="uploadSectionW2P">
-                    <div class="drop-zone" id="dropZoneW2P">
-                        <input type="file" id="fileInputW2P" accept=".docx" multiple hidden>
-                        <div class="drop-content">
-                            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h9"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                                <path d="M15.5 15.5h5.5m0 0-2.2-2.2m2.2 2.2-2.2 2.2"/>
-                            </svg>
-                            <p class="drop-title">Arrastra uno o más archivos .docx aquí</p>
-                            <p class="drop-hint">o haz clic para seleccionar · Solo formato .docx (Word moderno)</p>
-                        </div>
+                <section class="upload-section">
+                    <div class="drop-zone">
+                        <p class="drop-title">Panel de Word a PDF en construcción</p>
+                        <p class="drop-hint">Pronto disponible</p>
                     </div>
-                </section>
-
-                <section class="options-section" id="optionsSectionW2P" style="display:none;">
-                    <div class="file-bar">
-                        <div class="file-meta">
-                            <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                            <span class="file-name" id="fileNameW2P">0 archivos seleccionados</span>
-                        </div>
-                        <button class="btn-icon" id="removeFileW2P" title="Limpiar todo">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <div class="settings-grid">
-                        <div class="field">
-                            <label>Tamaño de página</label>
-                            <div class="segmented" id="w2pFormatSelector">
-                                <button class="segment active" data-value="a4">A4</button>
-                                <button class="segment" data-value="letter">Carta</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="image-queue" id="w2pQueue"></div>
-
-                    <div class="actions">
-                        <button class="btn-primary" id="convertBtnW2P">
-                            <span class="btn-label">Convertir a PDF</span>
-                            <span class="btn-spinner" style="display:none;">
-                                <svg class="spin" viewBox="0 0 24 24">
-                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/>
-                                </svg>
-                                Convirtiendo...
-                            </span>
-                        </button>
-                    </div>
-                </section>
-
-                <section class="progress-section" id="progressSectionW2P" style="display:none;">
-                    <div class="progress-card">
-                        <div class="progress-header">
-                            <span class="progress-title" id="progressTitleW2P">Convirtiendo...</span>
-                            <span class="progress-percent" id="progressPercentW2P">0%</span>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill" id="progressFillW2P" style="width:0%"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="results-section" id="resultsSectionW2P" style="display:none;">
-                    <div class="results-toolbar">
-                        <div class="results-info">
-                            <h2>PDFs generados</h2>
-                            <p id="resultsMetaW2P">0 archivos listos</p>
-                        </div>
-                        <button class="btn-secondary" id="downloadZipBtnW2P">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Descargar ZIP
-                        </button>
-                    </div>
-                    <div class="pages-list" id="filesListW2P"></div>
                 </section>
             </div>
 
             <!-- ==================== MODO: PDF A WORD ==================== -->
             <div id="pdf2wordPanel" style="display:none;">
-                <section class="upload-section" id="uploadSectionP2W">
-                    <div class="drop-zone" id="dropZoneP2W">
-                        <input type="file" id="fileInputP2W" accept=".pdf" multiple hidden>
-                        <div class="drop-content">
-                            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h9"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                                <path d="M21 15.5h-5.5m0 0 2.2-2.2m-2.2 2.2 2.2 2.2"/>
-                            </svg>
-                            <p class="drop-title">Arrastra uno o más PDFs aquí</p>
-                            <p class="drop-hint">o haz clic para seleccionar · Genera un .docx editable por cada PDF</p>
-                        </div>
+                <section class="upload-section">
+                    <div class="drop-zone">
+                        <p class="drop-title">Panel de PDF a Word en construcción</p>
+                        <p class="drop-hint">Pronto disponible</p>
                     </div>
-                </section>
-
-                <section class="options-section" id="optionsSectionP2W" style="display:none;">
-                    <div class="file-bar">
-                        <div class="file-meta">
-                            <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                            <span class="file-name" id="fileNameP2W">0 archivos seleccionados</span>
-                        </div>
-                        <button class="btn-icon" id="removeFileP2W" title="Limpiar todo">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <div class="image-queue" id="p2wQueue"></div>
-
-                    <div class="actions">
-                        <button class="btn-primary" id="convertBtnP2W">
-                            <span class="btn-label">Convertir a Word</span>
-                            <span class="btn-spinner" style="display:none;">
-                                <svg class="spin" viewBox="0 0 24 24">
-                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/>
-                                </svg>
-                                Convirtiendo...
-                            </span>
-                        </button>
-                    </div>
-                </section>
-
-                <section class="progress-section" id="progressSectionP2W" style="display:none;">
-                    <div class="progress-card">
-                        <div class="progress-header">
-                            <span class="progress-title" id="progressTitleP2W">Convirtiendo...</span>
-                            <span class="progress-percent" id="progressPercentP2W">0%</span>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill" id="progressFillP2W" style="width:0%"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="results-section" id="resultsSectionP2W" style="display:none;">
-                    <div class="results-toolbar">
-                        <div class="results-info">
-                            <h2>Documentos Word generados</h2>
-                            <p id="resultsMetaP2W">0 archivos listos</p>
-                        </div>
-                        <button class="btn-secondary" id="downloadZipBtnP2W">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Descargar ZIP
-                        </button>
-                    </div>
-                    <div class="pages-list" id="filesListP2W"></div>
                 </section>
             </div>
         </main>
@@ -775,9 +371,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/app.js?v=3"></script>
 </body>
 </html>
