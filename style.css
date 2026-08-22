@@ -15,7 +15,11 @@
     --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+}
 
 body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -23,6 +27,19 @@ body {
     color: var(--text);
     line-height: 1.5;
     min-height: 100vh;
+}
+
+/* Scrollbar global */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--surface-hover); }
+
+/* Accesibilidad global para navegación por teclado */
+:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
 }
 
 .app {
@@ -83,16 +100,15 @@ body {
     cursor: pointer;
     transition: all 0.2s;
 }
-.mode-btn:hover {
-    color: var(--text);
-}
+.mode-btn:hover { color: var(--text); }
 .mode-btn.active {
     background: var(--primary);
     color: #fff;
     box-shadow: var(--shadow);
 }
+.mode-btn:focus-visible { border-radius: 8px; }
 
-/* Upload */
+/* Upload Zone */
 .drop-zone {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
@@ -102,10 +118,11 @@ body {
     transition: all 0.25s ease;
     background: var(--surface);
 }
-.drop-zone:hover, .drop-zone.dragover {
+.drop-zone:hover, .drop-zone.dragover, .drop-zone:focus-visible {
     border-color: var(--primary);
     background: rgba(99,102,241,0.08);
     transform: translateY(-2px);
+    outline: none;
 }
 .drop-icon {
     width: 56px; height: 56px;
@@ -122,10 +139,8 @@ body {
     color: var(--text-secondary);
 }
 
-/* Options */
-.options-section {
-    animation: fadeUp 0.35s ease;
-}
+/* Options & Files */
+.options-section { animation: fadeUp 0.35s ease; }
 .file-bar {
     display: flex;
     align-items: center;
@@ -168,13 +183,14 @@ body {
     border-radius: 8px;
     transition: all 0.2s;
 }
-.btn-icon:hover {
+.btn-icon:hover, .btn-icon:focus-visible {
     background: rgba(239,68,68,0.15);
     color: var(--error);
+    outline: none;
 }
 .btn-icon svg { width: 18px; height: 18px; }
 
-/* Image Queue (img2pdf) */
+/* Image Queue */
 .image-queue {
     display: flex;
     flex-direction: column;
@@ -183,13 +199,6 @@ body {
     max-height: 400px;
     overflow-y: auto;
     padding-right: 0.5rem;
-}
-.image-queue::-webkit-scrollbar {
-    width: 6px;
-}
-.image-queue::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
 }
 .queue-item {
     display: flex;
@@ -201,9 +210,7 @@ body {
     padding: 0.625rem 0.875rem;
     transition: all 0.2s;
 }
-.queue-item:hover {
-    border-color: var(--primary);
-}
+.queue-item:hover { border-color: var(--primary); }
 .queue-thumb {
     width: 48px; height: 48px;
     object-fit: cover;
@@ -211,23 +218,20 @@ body {
     background: #0b1220;
     flex-shrink: 0;
 }
-.queue-name {
+.queue-name-wrap {
     flex: 1;
+    min-width: 0;
+}
+.queue-name {
+    display: block;
     font-size: 0.875rem;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    min-width: 0;
-}
-.queue-name-wrap {
-    flex: 1;
-    min-width: 0;
-}
-.queue-name-wrap .queue-name {
-    display: block;
 }
 .queue-newname {
+    display: block;
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--primary);
@@ -256,14 +260,8 @@ body {
     cursor: pointer;
     transition: all 0.15s;
 }
-.queue-btn:hover {
-    background: var(--primary);
-    color: #fff;
-}
-.queue-btn svg { width: 14px; height: 14px; }
-.queue-btn.delete:hover {
-    background: var(--error);
-}
+.queue-btn:hover { background: var(--primary); color: #fff; }
+.queue-btn.delete:hover { background: var(--error); }
 
 /* Settings */
 .settings-grid {
@@ -280,6 +278,21 @@ body {
     letter-spacing: 0.05em;
     color: var(--text-secondary);
     margin-bottom: 0.5rem;
+}
+.field input[type="text"], .field input[type="number"] {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.field input[type="text"]:focus, .field input[type="number"]:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
 .segmented {
@@ -299,13 +312,9 @@ body {
     cursor: pointer;
     transition: all 0.2s;
 }
-.segment.active {
-    background: var(--primary);
-    color: #fff;
-}
-.segment:not(.active):hover {
-    color: var(--text);
-}
+.segment.active { background: var(--primary); color: #fff; }
+.segment:not(.active):hover { color: var(--text); }
+.segment:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 
 .range-wrap {
     display: flex;
@@ -346,10 +355,12 @@ select {
     font-size: 0.9rem;
     cursor: pointer;
     outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
-select:focus {
+select:focus, select:focus-visible {
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-glow);
+    outline: none;
 }
 
 /* Buttons */
@@ -384,9 +395,7 @@ select:focus {
     color: var(--text);
     border: 1px solid var(--border);
 }
-.btn-secondary:hover {
-    background: var(--surface-hover);
-}
+.btn-secondary:hover { background: var(--surface-hover); }
 .btn-secondary svg { width: 18px; height: 18px; }
 
 .btn-ghost {
@@ -487,12 +496,9 @@ select:focus {
     cursor: pointer;
     transition: all 0.2s;
 }
-.page-dl:hover {
-    background: var(--primary);
-    color: #fff;
-}
+.page-dl:hover { background: var(--primary); color: #fff; }
 
-/* PDF Preview Area (img2pdf result) */
+/* PDF Preview Area */
 .pdf-preview-area {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -512,7 +518,7 @@ select:focus {
     color: var(--text);
 }
 
-/* Toast */
+/* Toast Notification */
 .toast {
     position: fixed;
     bottom: 1.5rem;
@@ -556,10 +562,11 @@ select:focus {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* Responsive */
 @media (max-width: 640px) {
     .app { padding: 1.25rem 1rem; }
-    .mode-btn { font-size: 0.8rem; padding: 0.5rem; }
-    .settings-grid { grid-template-columns: 1fr; }
+    .mode-btn { font-size: 0.8rem; padding: 0.5rem; flex: 1 1 45%; }
+    .settings-grid { grid-template-columns: 1fr; gap: 1rem; }
     .pages-list { grid-template-columns: repeat(2, 1fr); }
     .results-toolbar { flex-direction: column; align-items: flex-start; }
     .queue-name { max-width: 120px; }
