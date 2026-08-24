@@ -511,10 +511,10 @@
                 setImgProgress((i / total) * 100, `Procesando imagen ${i + 1} de ${total}...`);
 
                 const item = imageFiles[i];
-                const imgData = await fileToBase64(item.file);
-
-                // Obtener dimensiones de la imagen
-                const dims = await getImageDimensions(imgData);
+                const MAX_IMG_LONG_SIDE = 2000;
+                const processed = await preprocessImageForPdf(item.file, MAX_IMG_LONG_SIDE, quality);
+                const imgData = processed.dataUrl;
+                const dims = { width: processed.width, height: processed.height };
                 const imgRatio = dims.width / dims.height;
 
                 // Si es modo original, crear página del tamaño de la imagen (convertido a mm, asumiendo 96dpi)
@@ -555,8 +555,7 @@
                 if (i > 0) doc.addPage();
 
                 // Si es JPEG, usar compresión. Si es PNG, jsPDF lo maneja bien.
-                const imgFormat = item.file.type === 'image/png' ? 'PNG' : 'JPEG';
-                doc.addImage(imgData, imgFormat, x, y, drawW, drawH, undefined, 'FAST');
+                doc.addImage(imgData, 'JPEG', x, y, drawW, drawH, undefined, 'FAST');
             }
 
             setImgProgress(100, 'Finalizando...');
@@ -608,6 +607,38 @@
         progressSectionImg.style.display = 'none';
         resultsSectionImg.style.display = 'none';
         setImgProgress(0, '');
+    }
+
+function preprocessImageForPdf(file, maxLongSide, quality) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                URL.revokeObjectURL(url);
+                let w = img.width;
+                let h = img.height;
+                const longSide = Math.max(w, h);
+                if (longSide > maxLongSide) {
+                    const scale = maxLongSide / longSide;
+                    w = Math.round(w * scale);
+                    h = Math.round(h * scale);
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, w, h);
+                ctx.drawImage(img, 0, 0, w, h);
+                const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                resolve({ dataUrl, width: w, height: h });
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                reject(new Error('No se pudo cargar la imagen'));
+            };
+            img.src = url;
+        });
     }
 
     function fileToBase64(file) {
