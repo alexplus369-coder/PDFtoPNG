@@ -11,6 +11,30 @@
         setTimeout(() => toastEl.classList.remove('show'), 3200);
     }
 
+
+    function sortFiles(files, criterion) {
+        const [key, dir] = criterion.split('-');
+        const sorted = [...files];
+        sorted.sort((a, b) => {
+            let valA, valB;
+            if (key === 'name') {
+                valA = a.file.name.toLowerCase();
+                valB = b.file.name.toLowerCase();
+            } else if (key === 'date') {
+                valA = a.file.lastModified || 0;
+                valB = b.file.lastModified || 0;
+            } else if (key === 'size') {
+                valA = a.file.size || 0;
+                valB = b.file.size || 0;
+            } else {
+                return 0;
+            }
+            if (valA < valB) return dir === 'asc' ? -1 : 1;
+            if (valA > valB) return dir === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return sorted;
+    }
     function formatBytes(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
@@ -346,6 +370,16 @@
     removeFileImg.addEventListener('click', resetImgMode);
     convertBtnImg.addEventListener('click', startImgToPdf);
 
+    const imgSortSelect = $('#imgSortSelect');
+    if (imgSortSelect) {
+        imgSortSelect.addEventListener('change', () => {
+            if (imageFiles.length) {
+                imageFiles = sortFiles(imageFiles, imgSortSelect.value);
+                renderImageQueue();
+            }
+        });
+    }
+
     function handleImageFiles(files) {
         const valid = files.filter(f => f.type === 'image/png' || f.type === 'image/jpeg' || f.type === 'image/jpg');
         if (!valid.length) {
@@ -358,6 +392,9 @@
             const url = URL.createObjectURL(file);
             imageFiles.push({ file, id, url });
         });
+
+        const imgSortValue = $('#imgSortSelect') ? $('#imgSortSelect').value : 'name-asc';
+        imageFiles = sortFiles(imageFiles, imgSortValue);
 
         renderImageQueue();
         updateImgUI();
@@ -636,6 +673,16 @@
     removeFileMerge.addEventListener('click', resetMergeMode);
     convertBtnMerge.addEventListener('click', startMergePdf);
 
+    const mergeSortSelect = $('#mergeSortSelect');
+    if (mergeSortSelect) {
+        mergeSortSelect.addEventListener('change', () => {
+            if (mergeFiles.length) {
+                mergeFiles = sortFiles(mergeFiles, mergeSortSelect.value);
+                renderMergeQueue();
+            }
+        });
+    }
+
     function handleMergeFiles(files) {
         const valid = files.filter(f => f.type === 'application/pdf');
         if (!valid.length) {
@@ -646,6 +693,8 @@
             const id = 'pdf-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             mergeFiles.push({ file, id });
         });
+        const mergeSortValue = $('#mergeSortSelect') ? $('#mergeSortSelect').value : 'name-asc';
+        mergeFiles = sortFiles(mergeFiles, mergeSortValue);
         renderMergeQueue();
         updateMergeUI();
     }
@@ -1092,6 +1141,16 @@
     convertBtnRename.addEventListener('click', startRenameFiles);
     downloadZipBtnRename.addEventListener('click', downloadRenameZip);
 
+    const renameSortSelect = $('#renameSortSelect');
+    if (renameSortSelect) {
+        renameSortSelect.addEventListener('change', () => {
+            if (renameFiles.length) {
+                renameFiles = sortFiles(renameFiles, renameSortSelect.value);
+                renderRenameQueue();
+            }
+        });
+    }
+
     [renamePrefixInput, renameStartInput, renamePadSelect].forEach(el => {
         el.addEventListener('input', updateRenamePreviews);
         el.addEventListener('change', updateRenamePreviews);
@@ -1122,6 +1181,8 @@
             const url = isImage ? URL.createObjectURL(file) : null;
             renameFiles.push({ file, id, url, ext: getFileExt(file), isImage });
         });
+        const renameSortValue = $('#renameSortSelect') ? $('#renameSortSelect').value : 'name-asc';
+        renameFiles = sortFiles(renameFiles, renameSortValue);
         renderRenameQueue();
         updateRenameUI();
     }
@@ -1859,6 +1920,16 @@
     convertBtnW2P.addEventListener('click', startW2PConvert);
     downloadZipBtnW2P.addEventListener('click', () => downloadResultsZip(w2pResults, 'documentos-pdf.zip', downloadZipBtnW2P));
 
+    const w2pSortSelect = $('#w2pSortSelect');
+    if (w2pSortSelect) {
+        w2pSortSelect.addEventListener('change', () => {
+            if (w2pFiles.length) {
+                w2pFiles = sortFiles(w2pFiles, w2pSortSelect.value);
+                redrawW2PQueue();
+            }
+        });
+    }
+
     function handleW2PFiles(files) {
         const valid = files.filter(f => f.name.toLowerCase().endsWith('.docx'));
         if (!valid.length) {
@@ -1869,6 +1940,8 @@
             const id = 'w2p-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             w2pFiles.push({ file, id });
         });
+        const w2pSortValue = $('#w2pSortSelect') ? $('#w2pSortSelect').value : 'name-asc';
+        w2pFiles = sortFiles(w2pFiles, w2pSortValue);
         redrawW2PQueue();
         updateW2PUI();
     }
@@ -2001,6 +2074,16 @@
     convertBtnP2W.addEventListener('click', startP2WConvert);
     downloadZipBtnP2W.addEventListener('click', () => downloadResultsZip(p2wResults, 'documentos-word.zip', downloadZipBtnP2W));
 
+    const p2wSortSelect = $('#p2wSortSelect');
+    if (p2wSortSelect) {
+        p2wSortSelect.addEventListener('change', () => {
+            if (p2wFiles.length) {
+                p2wFiles = sortFiles(p2wFiles, p2wSortSelect.value);
+                redrawP2WQueue();
+            }
+        });
+    }
+
     function handleP2WFiles(files) {
         const valid = files.filter(f => f.type === 'application/pdf');
         if (!valid.length) {
@@ -2011,6 +2094,8 @@
             const id = 'p2w-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             p2wFiles.push({ file, id });
         });
+        const p2wSortValue = $('#p2wSortSelect') ? $('#p2wSortSelect').value : 'name-asc';
+        p2wFiles = sortFiles(p2wFiles, p2wSortValue);
         redrawP2WQueue();
         updateP2WUI();
     }
