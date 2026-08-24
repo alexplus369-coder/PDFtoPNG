@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=1">
+<base target="_blank">
 </head>
 <body>
     <div class="app">
@@ -224,7 +225,18 @@
                     </div>
 
                     <!-- Lista de imágenes -->
-                    <div class="image-queue" id="imageQueue"></div>
+                                        <div class="sort-bar" style="display:flex;gap:0.6rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+                        <label style="font-size:0.85rem;color:var(--muted);font-weight:500;">Ordenar por:</label>
+                        <select class="sort-select" id="imgSortSelect" style="padding:0.4rem 0.7rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.85rem;outline:none;cursor:pointer;">
+                            <option value="name-asc">Nombre (A → Z)</option>
+                            <option value="name-desc">Nombre (Z → A)</option>
+                            <option value="date-asc">Fecha (más antiguo primero)</option>
+                            <option value="date-desc">Fecha (más reciente primero)</option>
+                            <option value="size-asc">Tamaño (menor primero)</option>
+                            <option value="size-desc">Tamaño (mayor primero)</option>
+                        </select>
+                    </div>
+<div class="image-queue" id="imageQueue"></div>
 
                     <div class="settings-grid">
                         <div class="field">
@@ -340,7 +352,18 @@
                         </button>
                     </div>
 
-                    <div class="image-queue" id="mergeQueue"></div>
+                                        <div class="sort-bar" style="display:flex;gap:0.6rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+                        <label style="font-size:0.85rem;color:var(--muted);font-weight:500;">Ordenar por:</label>
+                        <select class="sort-select" id="mergeSortSelect" style="padding:0.4rem 0.7rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.85rem;outline:none;cursor:pointer;">
+                            <option value="name-asc">Nombre (A → Z)</option>
+                            <option value="name-desc">Nombre (Z → A)</option>
+                            <option value="date-asc">Fecha (más antiguo primero)</option>
+                            <option value="date-desc">Fecha (más reciente primero)</option>
+                            <option value="size-asc">Tamaño (menor primero)</option>
+                            <option value="size-desc">Tamaño (mayor primero)</option>
+                        </select>
+                    </div>
+<div class="image-queue" id="mergeQueue"></div>
 
                     <div class="actions">
                         <button class="btn-primary" id="convertBtnMerge">
@@ -545,7 +568,18 @@
                     </div>
 
                     <!-- Lista de archivos con vista previa -->
-                    <div class="image-queue" id="renameQueue"></div>
+                                        <div class="sort-bar" style="display:flex;gap:0.6rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+                        <label style="font-size:0.85rem;color:var(--muted);font-weight:500;">Ordenar por:</label>
+                        <select class="sort-select" id="renameSortSelect" style="padding:0.4rem 0.7rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.85rem;outline:none;cursor:pointer;">
+                            <option value="name-asc">Nombre (A → Z)</option>
+                            <option value="name-desc">Nombre (Z → A)</option>
+                            <option value="date-asc">Fecha (más antiguo primero)</option>
+                            <option value="date-desc">Fecha (más reciente primero)</option>
+                            <option value="size-asc">Tamaño (menor primero)</option>
+                            <option value="size-desc">Tamaño (mayor primero)</option>
+                        </select>
+                    </div>
+<div class="image-queue" id="renameQueue"></div>
 
                     <div class="actions">
                         <button class="btn-primary" id="convertBtnRename">
@@ -635,7 +669,18 @@
                         </div>
                     </div>
 
-                    <div class="image-queue" id="w2pQueue"></div>
+                                        <div class="sort-bar" style="display:flex;gap:0.6rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+                        <label style="font-size:0.85rem;color:var(--muted);font-weight:500;">Ordenar por:</label>
+                        <select class="sort-select" id="w2pSortSelect" style="padding:0.4rem 0.7rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.85rem;outline:none;cursor:pointer;">
+                            <option value="name-asc">Nombre (A → Z)</option>
+                            <option value="name-desc">Nombre (Z → A)</option>
+                            <option value="date-asc">Fecha (más antiguo primero)</option>
+                            <option value="date-desc">Fecha (más reciente primero)</option>
+                            <option value="size-asc">Tamaño (menor primero)</option>
+                            <option value="size-desc">Tamaño (mayor primero)</option>
+                        </select>
+                    </div>
+<div class="image-queue" id="w2pQueue"></div>
 
                     <div class="actions">
                         <button class="btn-primary" id="convertBtnW2P">
@@ -715,7 +760,18 @@
                         </button>
                     </div>
 
-                    <div class="image-queue" id="p2wQueue"></div>
+                                        <div class="sort-bar" style="display:flex;gap:0.6rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+                        <label style="font-size:0.85rem;color:var(--muted);font-weight:500;">Ordenar por:</label>
+                        <select class="sort-select" id="p2wSortSelect" style="padding:0.4rem 0.7rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.85rem;outline:none;cursor:pointer;">
+                            <option value="name-asc">Nombre (A → Z)</option>
+                            <option value="name-desc">Nombre (Z → A)</option>
+                            <option value="date-asc">Fecha (más antiguo primero)</option>
+                            <option value="date-desc">Fecha (más reciente primero)</option>
+                            <option value="size-asc">Tamaño (menor primero)</option>
+                            <option value="size-desc">Tamaño (mayor primero)</option>
+                        </select>
+                    </div>
+<div class="image-queue" id="p2wQueue"></div>
 
                     <div class="actions">
                         <button class="btn-primary" id="convertBtnP2W">
