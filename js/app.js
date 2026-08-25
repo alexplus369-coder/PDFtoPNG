@@ -370,6 +370,18 @@
     removeFileImg.addEventListener('click', resetImgMode);
     convertBtnImg.addEventListener('click', startImgToPdf);
 
+    const addMoreFileImg = $('#addMoreFileImg');
+    const addMoreInputImg = $('#addMoreInputImg');
+    if (addMoreFileImg && addMoreInputImg) {
+        addMoreFileImg.addEventListener('click', () => {
+            addMoreInputImg.value = '';
+            addMoreInputImg.click();
+        });
+        addMoreInputImg.addEventListener('change', (e) => {
+            if (e.target.files.length) handleImageFiles(Array.from(e.target.files));
+        });
+    }
+
     const imgSortSelect = $('#imgSortSelect');
     if (imgSortSelect) {
         imgSortSelect.addEventListener('change', () => {
@@ -703,6 +715,18 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
 
     removeFileMerge.addEventListener('click', resetMergeMode);
     convertBtnMerge.addEventListener('click', startMergePdf);
+
+    const addMoreFileMerge = $('#addMoreFileMerge');
+    const addMoreInputMerge = $('#addMoreInputMerge');
+    if (addMoreFileMerge && addMoreInputMerge) {
+        addMoreFileMerge.addEventListener('click', () => {
+            addMoreInputMerge.value = '';
+            addMoreInputMerge.click();
+        });
+        addMoreInputMerge.addEventListener('change', (e) => {
+            if (e.target.files.length) handleMergeFiles(Array.from(e.target.files));
+        });
+    }
 
     const mergeSortSelect = $('#mergeSortSelect');
     if (mergeSortSelect) {
@@ -1171,6 +1195,18 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     removeFileRename.addEventListener('click', resetRenameMode);
     convertBtnRename.addEventListener('click', startRenameFiles);
     downloadZipBtnRename.addEventListener('click', downloadRenameZip);
+
+    const addMoreFileRename = $('#addMoreFileRename');
+    const addMoreInputRename = $('#addMoreInputRename');
+    if (addMoreFileRename && addMoreInputRename) {
+        addMoreFileRename.addEventListener('click', () => {
+            addMoreInputRename.value = '';
+            addMoreInputRename.click();
+        });
+        addMoreInputRename.addEventListener('change', (e) => {
+            if (e.target.files.length) handleRenameFiles(Array.from(e.target.files));
+        });
+    }
 
     const renameSortSelect = $('#renameSortSelect');
     if (renameSortSelect) {
@@ -1951,6 +1987,18 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     convertBtnW2P.addEventListener('click', startW2PConvert);
     downloadZipBtnW2P.addEventListener('click', () => downloadResultsZip(w2pResults, 'documentos-pdf.zip', downloadZipBtnW2P));
 
+    const addMoreFileW2P = $('#addMoreFileW2P');
+    const addMoreInputW2P = $('#addMoreInputW2P');
+    if (addMoreFileW2P && addMoreInputW2P) {
+        addMoreFileW2P.addEventListener('click', () => {
+            addMoreInputW2P.value = '';
+            addMoreInputW2P.click();
+        });
+        addMoreInputW2P.addEventListener('change', (e) => {
+            if (e.target.files.length) handleW2PFiles(Array.from(e.target.files));
+        });
+    }
+
     const w2pSortSelect = $('#w2pSortSelect');
     if (w2pSortSelect) {
         w2pSortSelect.addEventListener('change', () => {
@@ -2104,6 +2152,18 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     removeFileP2W.addEventListener('click', resetP2WMode);
     convertBtnP2W.addEventListener('click', startP2WConvert);
     downloadZipBtnP2W.addEventListener('click', () => downloadResultsZip(p2wResults, 'documentos-word.zip', downloadZipBtnP2W));
+
+    const addMoreFileP2W = $('#addMoreFileP2W');
+    const addMoreInputP2W = $('#addMoreInputP2W');
+    if (addMoreFileP2W && addMoreInputP2W) {
+        addMoreFileP2W.addEventListener('click', () => {
+            addMoreInputP2W.value = '';
+            addMoreInputP2W.click();
+        });
+        addMoreInputP2W.addEventListener('change', (e) => {
+            if (e.target.files.length) handleP2WFiles(Array.from(e.target.files));
+        });
+    }
 
     const p2wSortSelect = $('#p2wSortSelect');
     if (p2wSortSelect) {
