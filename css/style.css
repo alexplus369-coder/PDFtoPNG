@@ -306,6 +306,28 @@ body {
 .segment:not(.active):hover {
     color: var(--text);
 }
+.segment .seg-sub {
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 500;
+    opacity: 0.75;
+    margin-top: 2px;
+}
+.field-hint {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    margin-top: 0.45rem;
+}
+@media (max-width: 640px) {
+    .segmented.wrap-sm {
+        flex-wrap: wrap;
+    }
+    .segmented.wrap-sm .segment {
+        flex: 1 1 46%;
+        border-top: 1px solid var(--border);
+    }
+}
 
 .range-wrap {
     display: flex;
