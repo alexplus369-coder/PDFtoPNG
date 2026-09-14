@@ -1536,12 +1536,13 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     }
 
     // Cola genérica (solo eliminar, sin reordenar) para modos Word<->PDF
-    function renderSimpleQueue(container, files, iconColor, onDelete) {
+    function renderSimpleQueue(container, files, iconColor, onDelete, metaFn) {
         container.innerHTML = '';
         files.forEach((item) => {
             const div = document.createElement('div');
             div.className = 'queue-item';
             div.dataset.id = item.id;
+            const meta = metaFn ? metaFn(item) : null;
             div.innerHTML = `
                 <div class="queue-thumb" style="display:flex;align-items:center;justify-content:center;color:${iconColor};">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22">
@@ -1549,7 +1550,10 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                         <polyline points="14 2 14 8 20 8"/>
                     </svg>
                 </div>
-                <span class="queue-name" title="${item.file.name}">${item.file.name}</span>
+                <div class="queue-name-wrap">
+                    <span class="queue-name" title="${item.file.name}">${item.file.name}</span>
+                    ${meta ? `<span class="queue-sub${meta.warn ? ' warn' : ''}">${meta.text}</span>` : ''}
+                </div>
                 <span class="queue-size">${formatBytes(item.file.size)}</span>
                 <div class="queue-controls">
                     <button class="queue-btn delete" title="Eliminar" data-id="${item.id}">
@@ -2296,11 +2300,68 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         'hi': 'Hindi'
     };
     const TR_CJK_RE = /[\u2E80-\u9FFF\uF900-\uFAFF\uFF66-\uFF9F]/;
-    const trCache = new Map();        // "sl|tl|segmento" → traducción
+    const trCache = new Map();        // "sl|tl|segmento" → traducción (persistente)
     let trProvider = 'google';        // proveedor preferente (sticky)
     let trFailedSegments = 0;         // segmentos que conservaron el original
 
+    // ===== Configuración del traductor =====
+    const TR_MAX_FILE_MB = 50;                          // peso máximo por PDF (MB)
+    const TR_MAX_FILE_BYTES = TR_MAX_FILE_MB * 1024 * 1024;
+    const TR_PROXY_URL = '';                            // opcional: URL de un proxy propio en Vercel (ver carpeta opcional-vercel/)
+    const TR_BATCH_MAX = 8;                             // párrafos máximo por petición (lote)
+    const TR_CONSEC_FAILS_STOP = 5;                     // fallos consecutivos antes de cortar el documento
+    const TR_CACHE_KEY = 'pdftools_trcache_v1';
+    const TR_CACHE_MAX_CHARS = 2500000;                 // ~2.5 MB en localStorage
+
     function trSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // fetch con tiempo límite (evita cuelgues de servicios caídos)
+    function trFetch(url, opts, ms) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), ms || 12000);
+        return fetch(url, opts).finally(() => clearTimeout(t));
+    }
+
+    // ===== Caché persistente: reanuda traducciones interrumpidas =====
+    (function trCacheLoad() {
+        try {
+            const raw = localStorage.getItem(TR_CACHE_KEY);
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) arr.forEach(p => { if (p && p[0]) trCache.set(p[0], p[1]); });
+            }
+        } catch (e) { /* almacenamiento no disponible */ }
+    })();
+    let trSaveTimer = null;
+    function trCachePersist() {
+        if (!trCache.size) return;   // nunca borre entradas existentes con un Map vacío
+        try {
+            // Fusiona con lo ya almacenado (otras pestañas no pierden sus entradas)
+            try {
+                const prev = JSON.parse(localStorage.getItem(TR_CACHE_KEY) || '[]');
+                if (Array.isArray(prev)) prev.forEach(p => {
+                    if (p && p[0] && typeof p[1] === 'string' && !trCache.has(p[0])) trCache.set(p[0], p[1]);
+                });
+            } catch (e) { /* entrada corrupta: se ignora */ }
+            let arr = Array.from(trCache.entries());
+            let json = JSON.stringify(arr);
+            while (json.length > TR_CACHE_MAX_CHARS && arr.length > 16) {
+                arr = arr.slice(Math.floor(arr.length / 4));   // descarta los más antiguos
+                json = JSON.stringify(arr);
+            }
+            localStorage.setItem(TR_CACHE_KEY, json);
+        } catch (e) { /* almacenamiento lleno o bloqueado */ }
+    }
+    function trCacheScheduleSave() {
+        clearTimeout(trSaveTimer);
+        trSaveTimer = setTimeout(trCachePersist, 4000);
+    }
+    window.addEventListener('pagehide', () => trCachePersist());
+
+    function trWords(s) {
+        if (TR_CJK_RE.test(s)) return Math.max(1, Math.round(s.length / 2));
+        return s.split(/\s+/).filter(Boolean).length;
+    }
 
     // Divide un texto largo en trozos <= maxLen respetando párrafos,
     // frases y palabras (sin lookbehind, compatible con Safari antiguo)
@@ -2337,7 +2398,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t'
             + '&sl=' + encodeURIComponent(sl) + '&tl=' + encodeURIComponent(tl)
             + '&q=' + encodeURIComponent(text);
-        const res = await fetch(url);
+        const res = await trFetch(url);
         if (!res.ok) throw new Error('google-http-' + res.status);
         const data = await res.json();
         if (!data || !Array.isArray(data[0])) throw new Error('google-formato');
@@ -2352,12 +2413,62 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const src = (sl && sl !== 'auto') ? sl : 'en';
         const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text)
             + '&langpair=' + encodeURIComponent(src + '|' + tl);
-        const res = await fetch(url);
+        const res = await trFetch(url);
         if (!res.ok) throw new Error('mymemory-http-' + res.status);
         const data = await res.json();
         const t = data && data.responseData && data.responseData.translatedText;
         if (!t || /QUERY LENGTH LIMIT|INVALID|QUOTA/i.test(t)) throw new Error('mymemory-rechazo');
         return { text: t, detected: null };
+    }
+
+    // Proveedor 0 (opcional): proxy propio desplegado en Vercel (gratis)
+    async function trProxy(text, sl, tl) {
+        const res = await trFetch(TR_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text, sl: sl, tl: tl })
+        }, 20000);
+        if (!res.ok) throw new Error('proxy-http-' + res.status);
+        const data = await res.json();
+        if (!data || !data.text) throw new Error('proxy-formato');
+        return { text: data.text, detected: data.detected || null };
+    }
+
+    // Proveedor extra: endpoint de Google usado por extensiones (muy permisivo)
+    async function trGoogleChrome(text, sl, tl) {
+        const url = 'https://clients5.google.com/translate_a/t?client=dict-chrome-ex'
+            + '&sl=' + encodeURIComponent(sl === 'auto' ? 'auto' : sl)
+            + '&tl=' + encodeURIComponent(tl)
+            + '&q=' + encodeURIComponent(text);
+        const res = await trFetch(url);
+        if (!res.ok) throw new Error('gchrome-http-' + res.status);
+        const data = await res.json();
+        if (!Array.isArray(data) || !Array.isArray(data[0])) throw new Error('gchrome-formato');
+        let out = '';
+        data[0].forEach(seg => {
+            if (typeof seg === 'string') out += seg;
+            else if (Array.isArray(seg) && typeof seg[0] === 'string') out += seg[0];
+        });
+        if (!out.trim()) throw new Error('gchrome-vacio');
+        return { text: out, detected: null };
+    }
+
+    // Proveedor extra: Lingva (frontend libre de Google Translate, sin clave)
+    const TR_LINGVA_HOSTS = ['https://lingva.lunar.icu', 'https://lingva.ml'];
+    async function trLingva(text, sl, tl) {
+        let lastErr = null;
+        for (const host of TR_LINGVA_HOSTS) {
+            try {
+                const url = host + '/api/v1/' + encodeURIComponent(sl === 'auto' ? 'auto' : sl)
+                    + '/' + encodeURIComponent(tl) + '/' + encodeURIComponent(text);
+                const res = await trFetch(url, null, 9000);
+                if (!res.ok) throw new Error('lingva-http-' + res.status);
+                const data = await res.json();
+                if (!data || !data.translation) throw new Error('lingva-vacio');
+                return { text: data.translation, detected: null };
+            } catch (e) { lastErr = e; }
+        }
+        throw lastErr || new Error('lingva-fallo');
     }
 
     // Detecta el idioma de una muestra: online, con heurística offline de respaldo
@@ -2366,7 +2477,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         try {
             const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t'
                 + '&sl=auto&tl=en&q=' + encodeURIComponent(short);
-            const res = await fetch(url);
+            const res = await trFetch(url, null, 8000);
             if (res.ok) {
                 const data = await res.json();
                 if (data && typeof data[2] === 'string' && data[2]) return data[2];
@@ -2402,34 +2513,79 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         return counts[0][1] > 0 ? counts[0][0] : 'en';
     }
 
+    // Registro de proveedores: límite de caracteres por petición y pausa
+    // adaptativa (se duplica ante 429/cuota y decae tras cada éxito).
+    const TR_PROVIDERS = {};
+    if (TR_PROXY_URL) TR_PROVIDERS.proxy = { limit: 4500, pause0: 120, fn: trProxy };
+    TR_PROVIDERS.google = { limit: 1200, pause0: 150, fn: trGoogle };
+    TR_PROVIDERS.gchrome = { limit: 1000, pause0: 150, fn: trGoogleChrome };
+    TR_PROVIDERS.lingva = { limit: 1200, pause0: 220, fn: trLingva };
+    TR_PROVIDERS.mymemory = { limit: 460, pause0: 260, fn: trMyMemory };
+
+    const trPauses = {};
+    function trOrder() {
+        const names = Object.keys(TR_PROVIDERS);
+        if (trProvider && TR_PROVIDERS[trProvider]) {
+            return [trProvider].concat(names.filter(n => n !== trProvider));
+        }
+        return names;
+    }
+    function trIsQuotaError(err) {
+        return /http-429|http-5\d\d|QUOTA|LIMIT|rechazo/i.test(String((err && err.message) || err));
+    }
+
+    // Traduce UN texto (ya dentro del límite del proveedor) recorriendo la
+    // cadena de proveedores con 2 reintentos y pausa adaptativa cada uno.
+    async function trTranslateRaw(text, sl, tl) {
+        let lastErr = null;
+        for (const prov of trOrder()) {
+            const P = TR_PROVIDERS[prov];
+            if (text.length > P.limit) continue;    // este proveedor no admite textos tan largos
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    const out = await P.fn(text, sl, tl);
+                    if (!out || !out.text) throw new Error('respuesta-vacía');
+                    trProvider = prov;
+                    trPauses[prov] = Math.max(P.pause0, Math.round((trPauses[prov] || P.pause0) * 0.85));
+                    return out;
+                } catch (err) {
+                    lastErr = err;
+                    if (trIsQuotaError(err)) trPauses[prov] = Math.min((trPauses[prov] || P.pause0) * 2, 8000);
+                    await trSleep(400 + 500 * attempt);
+                }
+            }
+        }
+        throw lastErr || new Error('sin-proveedor');
+    }
+
     // Traduce un segmento (párrafo) usando el proveedor preferente y,
-    // si falla, el alternativo; reintenta 2 veces por proveedor.
+    // si falla, los alternativos; con caché, troceado automático y pausa adaptativa.
     async function trTranslateSegment(text, sl, tl) {
         const key = sl + '|' + tl + '|' + text;
         if (trCache.has(key)) return trCache.get(key);
 
-        const order = trProvider === 'google' ? ['google', 'mymemory'] : ['mymemory', 'google'];
-        const limits = { google: 1200, mymemory: 460 };
         let lastErr = null;
-
-        for (const prov of order) {
+        for (const prov of trOrder()) {
+            const P = TR_PROVIDERS[prov];
             for (let attempt = 0; attempt < 2; attempt++) {
                 try {
-                    const parts = trChunkText(text, limits[prov]);
+                    const parts = trChunkText(text, P.limit);
                     const outParts = [];
                     for (const part of parts) {
-                        const fn = prov === 'google' ? trGoogle : trMyMemory;
-                        const out = await fn(part, sl, tl);
+                        const out = await P.fn(part, sl, tl);
                         if (!out || !out.text) throw new Error('respuesta-vacía');
                         outParts.push(out.text);
-                        await trSleep(120);
+                        await trSleep(Math.min(trPauses[prov] || P.pause0, 1500));
                     }
                     trProvider = prov;
+                    trPauses[prov] = Math.max(P.pause0, Math.round((trPauses[prov] || P.pause0) * 0.85));
                     const joined = outParts.join(' ');
                     trCache.set(key, joined);
+                    trCacheScheduleSave();
                     return joined;
                 } catch (err) {
                     lastErr = err;
+                    if (trIsQuotaError(err)) trPauses[prov] = Math.min((trPauses[prov] || P.pause0) * 2, 8000);
                     await trSleep(600 * (attempt + 1));
                 }
             }
@@ -2498,8 +2654,34 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         return { pages, hasText: totalChars >= 20 };
     }
 
+    // ===== Control de parada =====
+    let trCancelRequested = false;    // usuario pulsó "Detener"
+    let trStopReason = null;          // 'cancelado' | 'servicio'
+    let trConsecFails = 0;            // fallos consecutivos (circuit breaker)
+
+    function trCleanSeg(s) { return s.replace(/\s*\n\s*/g, ' ').trim(); }
+
+    // Traduce un lote de párrafos en UNA petición (unidos con saltos de
+    // línea) y valida estrictamente que la respuesta conserve el mismo
+    // número de partes. Si la validación falla, el llamante recurre a la
+    // traducción individual: nunca se corrompe el documento.
+    async function trTranslateBatchSegs(segs, sl, tl) {
+        const clean = segs.map(trCleanSeg);
+        const joined = clean.join('\n');
+        const r = await trTranslateRaw(joined, sl, tl);
+        const parts = String(r.text).split('\n').map(s => s.trim());
+        if (parts.length !== clean.length) throw new Error('batch-formato');
+        for (let i = 0; i < parts.length; i++) {
+            if (!parts[i]) throw new Error('batch-formato');
+            if (parts[i].length > clean[i].length * 3 + 60) throw new Error('batch-formato');
+        }
+        return parts;
+    }
+
     // Deduplica segmentos idénticos (encabezados/pies repetidos) y los
-    // traduce una sola vez, repartiendo el progreso de forma lineal.
+    // traduce en lotes para multiplicar la velocidad y reducir peticiones.
+    // Devuelve { pages, ok } donde ok marca qué párrafos quedaron bien
+    // traducidos (para el corte parcial en caso de parada).
     async function trTranslatePages(pages, sl, tl, onProgress) {
         const uniqueMap = new Map();
         const uniqList = [];
@@ -2514,19 +2696,105 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         });
 
         const translated = new Array(uniqList.length).fill(null);
-        for (let i = 0; i < uniqList.length; i++) {
-            try {
-                translated[i] = await trTranslateSegment(uniqList[i], sl, tl);
-            } catch (err) {
-                translated[i] = uniqList[i];
-                trFailedSegments++;
+        const okMap = new Array(uniqList.length).fill(false);
+        let done = 0;
+        let wordsDone = 0;
+
+        // Rellena desde la caché los segmentos ya traducidos (reanudación):
+        // los lotes que se formen después solo incluirán pendientes reales.
+        for (let ui = 0; ui < uniqList.length; ui++) {
+            const cached = trCache.get(sl + '|' + tl + '|' + uniqList[ui]);
+            if (typeof cached === 'string' && cached) {
+                translated[ui] = cached;
+                okMap[ui] = true;
+                done++;
+                wordsDone += trWords(uniqList[ui]);
             }
-            if (onProgress) onProgress((i + 1) / uniqList.length);
+        }
+        if (done && onProgress) onProgress(done, uniqList.length, wordsDone);
+
+        let i = 0;
+        let pendientes = uniqList.length;
+        const pendiente = (idx) => translated[idx] === null;
+
+        while (i < uniqList.length) {
+            if (done >= pendientes) break;
+            if (trCancelRequested) { trStopReason = 'cancelado'; break; }
+
+            // salta los segmentos ya resueltos por la caché
+            if (!pendiente(i)) { i++; continue; }
+
+            // Construye un lote respetando el límite del proveedor preferente
+            // (solo segmentos pendientes; los de caché no van en la petición)
+            const prefLimit = ((TR_PROVIDERS[trProvider] || TR_PROVIDERS.google).limit) - 60;
+            const batch = [uniqList[i]];
+            let len = trCleanSeg(batch[0]).length;
+            let j = i + 1;
+            while (j < uniqList.length && batch.length < TR_BATCH_MAX) {
+                if (!pendiente(j)) { j++; continue; }
+                const L = trCleanSeg(uniqList[j]).length;
+                if (len + 1 + L > prefLimit) break;
+                batch.push(uniqList[j]);
+                len += 1 + L;
+                j++;
+            }
+
+            let parts = null;
+            if (batch.length > 1) {
+                try { parts = await trTranslateBatchSegs(batch, sl, tl); }
+                catch (e) { parts = null; }   // cualquier fallo → traducción individual
+            }
+
+            for (let k = 0; k < batch.length && !trCancelRequested; k++) {
+                const ui = i + k;
+                if (!pendiente(ui)) continue;   // resuelto por caché
+                if (parts) {
+                    translated[ui] = parts[k];
+                    okMap[ui] = true;
+                    trCache.set(sl + '|' + tl + '|' + batch[k], parts[k]);
+                    trConsecFails = 0;
+                } else {
+                    try {
+                        translated[ui] = await trTranslateSegment(batch[k], sl, tl);
+                        okMap[ui] = true;
+                        trConsecFails = 0;
+                    } catch (err) {
+                        translated[ui] = batch[k];       // conserva el original
+                        okMap[ui] = false;
+                        trFailedSegments++;
+                        trConsecFails++;
+                    }
+                }
+                done++;
+                wordsDone += trWords(batch[k]);
+                if (onProgress) onProgress(done, uniqList.length, wordsDone);
+            }
+
+            trCacheScheduleSave();
+
+            // La cancelación del usuario tiene prioridad sobre el breaker
+            if (trCancelRequested) { trStopReason = 'cancelado'; break; }
+
+            // Circuit breaker: el servicio está caído → corta el documento
+            if (trConsecFails >= TR_CONSEC_FAILS_STOP && !parts) {
+                trStopReason = 'servicio';
+                break;
+            }
+
+            await trSleep(140);
+            i = j;
         }
 
+        // Los segmentos no alcanzados conservan el texto original
+        translated.forEach((v, idx) => { if (v === null) translated[idx] = uniqList[idx]; });
+
         const outPages = pages.map(pg => ({ paragraphs: pg.paragraphs.map(() => '') }));
-        targets.forEach(([pi, qi, ui]) => { outPages[pi].paragraphs[qi] = translated[ui]; });
-        return outPages;
+        const outOk = pages.map(pg => pg.paragraphs.map(() => false));
+        targets.forEach(([pi, qi, ui]) => {
+            outPages[pi].paragraphs[qi] = translated[ui];
+            outOk[pi][qi] = okMap[ui];
+        });
+        return { pages: outPages, ok: outOk };
     }
 
     // ---------- Generador TXT ----------
@@ -2534,13 +2802,16 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         let out = '';
         origPages.forEach((pg, i) => {
             out += '— Página ' + (i + 1) + ' —\n\n';
-            pg.paragraphs.forEach((p, qi) => {
-                const t = transPages[i].paragraphs[qi] || '';
-                if (!p && !t) return;
+            const tp = (transPages[i] && transPages[i].paragraphs) || [];
+            const n = Math.max(pg.paragraphs.length, tp.length);
+            for (let qi = 0; qi < n; qi++) {
+                const p = pg.paragraphs[qi] || '';
+                const t = tp[qi] || '';
+                if (!p && !t) continue;
                 if (bilingual && p) out += p + '\n';
                 if (t) out += t + '\n';
                 out += '\n';
-            });
+            }
         });
         return new Blob([out], { type: 'text/plain;charset=utf-8' });
     }
@@ -2551,9 +2822,12 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const children = [];
 
         origPages.forEach((pg, i) => {
-            pg.paragraphs.forEach((p, qi) => {
-                const t = transPages[i].paragraphs[qi] || '';
-                if (!p && !t) { children.push(new Paragraph({ text: '' })); return; }
+            const tp = (transPages[i] && transPages[i].paragraphs) || [];
+            const n = Math.max(pg.paragraphs.length, tp.length);
+            for (let qi = 0; qi < n; qi++) {
+                const p = pg.paragraphs[qi] || '';
+                const t = tp[qi] || '';
+                if (!p && !t) { children.push(new Paragraph({ text: '' })); continue; }
                 if (bilingual && p) {
                     children.push(new Paragraph({
                         children: [new TextRun({ text: p, color: '888888', italics: true, size: 20 })]
@@ -2563,7 +2837,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     children: [new TextRun({ text: t || p, size: 24 })]
                 }));
                 children.push(new Paragraph({ text: '' }));
-            });
+            }
             if (i < origPages.length - 1) children.push(new Paragraph({ children: [new PageBreak()] }));
         });
 
@@ -2674,12 +2948,15 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         origPages.forEach((pg, i) => {
             if (onProgress) onProgress((i + 1) / origPages.length);
             startPage();
-            pg.paragraphs.forEach((p, qi) => {
-                const t = transPages[i].paragraphs[qi] || '';
-                if (!p && !t) { y += 8; return; }
+            const tp = (transPages[i] && transPages[i].paragraphs) || [];
+            const n = Math.max(pg.paragraphs.length, tp.length);
+            for (let qi = 0; qi < n; qi++) {
+                const p = pg.paragraphs[qi] || '';
+                const t = tp[qi] || '';
+                if (!p && !t) { y += 8; continue; }
                 if (bilingual && p) drawParagraph(p, 20, true, '#666666', TR_CJK_RE.test(p));
                 drawParagraph(t || p, 24, false, '#111111', TR_CJK_RE.test(t || p));
-            });
+            }
         });
         drawFooter();
         pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, W, H);
@@ -2719,6 +2996,9 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     const resultsMetaTr = $('#resultsMetaTr');
     const downloadZipBtnTr = $('#downloadZipBtnTr');
     const filesListTr = $('#filesListTr');
+    const trStatsBar = $('#trStatsBar');
+    const trProgressStats = $('#trProgressStats');
+    const trCancelBtn = $('#trCancelBtn');
 
     let trFiles = [];
     let isConvertingTr = false;
@@ -2741,6 +3021,11 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     removeFileTr.addEventListener('click', resetTrMode);
     convertBtnTr.addEventListener('click', startTrTranslate);
     downloadZipBtnTr.addEventListener('click', () => downloadResultsZip(trResults, 'documentos-traducidos.zip', downloadZipBtnTr));
+    trCancelBtn.addEventListener('click', () => {
+        if (trCancelRequested) return;
+        trCancelRequested = true;
+        showToast('Deteniendo… se generará el documento con lo traducido hasta ahora', '');
+    });
 
     swapLangBtn.addEventListener('click', () => {
         const s = sourceLangSelect.value;
@@ -2784,19 +3069,101 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     }
 
     function handleTrFiles(files) {
-        const valid = files.filter(f => f.type === 'application/pdf');
+        const valid = [];
+        const tooBig = [];
+        files.forEach(f => {
+            if (f.type !== 'application/pdf') return;
+            if (f.size > TR_MAX_FILE_BYTES) tooBig.push(f);
+            else valid.push(f);
+        });
+        if (tooBig.length) {
+            const names = tooBig.slice(0, 3).map(f => f.name + ' (' + formatBytes(f.size) + ')').join(', ');
+            showToast('Se omite ' + names + (tooBig.length > 3 ? ' y ' + (tooBig.length - 3) + ' más' : '') + ': el máximo es ' + TR_MAX_FILE_MB + ' MB por PDF', 'error');
+        }
         if (!valid.length) {
-            showToast('Solo se permiten archivos PDF', 'error');
+            if (!tooBig.length) showToast('Solo se permiten archivos PDF', 'error');
             return;
         }
         valid.forEach(file => {
             const id = 'tr-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-            trFiles.push({ file, id });
+            trFiles.push({ file, id, doc: null, analyzing: false, error: null, words: 0, uniq: 0 });
         });
         const sortValue = $('#trSortSelect') ? $('#trSortSelect').value : 'name-asc';
         trFiles = sortFiles(trFiles, sortValue);
         redrawTrQueue();
         updateTrUI();
+        updateTrStatsBar();
+        trAnalyzeNext();
+    }
+
+    // ===== Pre-análisis en segundo plano: páginas, palabras y ETA por archivo =====
+    async function trAnalyzeNext() {
+        const item = trFiles.find(it => !it.doc && !it.analyzing && !it.error);
+        if (!item) { updateTrStatsBar(); return; }
+        item.analyzing = true;
+        redrawTrQueue();
+        try {
+            const doc = await trExtractPdf(item.file, null);
+            if (!trFiles.includes(item)) return;   // fue eliminado mientras se analizaba
+            item.doc = doc;
+            if (!doc.hasText) {
+                item.error = 'escaneado';
+            } else {
+                item.words = doc.pages.reduce((a, p) => a + p.paragraphs.join(' ').split(/\s+/).filter(Boolean).length, 0);
+                const s = new Set();
+                doc.pages.forEach(p => p.paragraphs.forEach(x => { if (x.trim()) s.add(x); }));
+                item.uniq = s.size;
+            }
+        } catch (e) {
+            if (trFiles.includes(item)) item.error = 'lectura';
+        }
+        item.analyzing = false;
+        redrawTrQueue();
+        updateTrStatsBar();
+        trAnalyzeNext();
+    }
+
+    function trFmtMin(seconds) {
+        if (seconds < 60) return '<1 min';
+        return Math.max(1, Math.round(seconds / 60)) + ' min';
+    }
+
+    function trItemMeta(item) {
+        if (item.analyzing) return { text: 'Analizando contenido…', warn: false };
+        if (item.error === 'escaneado') return { text: 'Sin texto seleccionable (escaneo) — no traducible', warn: true };
+        if (item.error === 'lectura') return { text: 'No se pudo leer el PDF', warn: true };
+        if (item.doc) {
+            const est = (item.uniq || 0) / 4.5 + item.doc.pages.length * 0.3;
+            const w = item.words || 0;
+            return {
+                text: item.doc.pages.length + (item.doc.pages.length === 1 ? ' página · ' : ' páginas · ')
+                    + w.toLocaleString('es') + (w === 1 ? ' palabra · ' : ' palabras · ')
+                    + '≈ ' + trFmtMin(est * 0.7) + ' – ' + trFmtMin(est * 1.9),
+                warn: false
+            };
+        }
+        return null;
+    }
+
+    function updateTrStatsBar() {
+        if (!trStatsBar) return;
+        if (!trFiles.length) { trStatsBar.style.display = 'none'; return; }
+        const analyzing = trFiles.some(it => it.analyzing);
+        const ready = trFiles.filter(it => it.doc && !it.error);
+        const scanned = trFiles.filter(it => it.error === 'escaneado').length;
+        const pages = ready.reduce((a, it) => a + (it.doc ? it.doc.pages.length : 0), 0);
+        const words = ready.reduce((a, it) => a + (it.words || 0), 0);
+        const uniq = ready.reduce((a, it) => a + (it.uniq || 0), 0);
+        const est = uniq / 4.5 + pages * 0.3;
+        const parts = [];
+        parts.push(trFiles.length + ' archivo' + (trFiles.length !== 1 ? 's' : ''));
+        if (pages) parts.push(pages + (pages === 1 ? ' página' : ' páginas'));
+        if (words) parts.push(words.toLocaleString('es') + (words === 1 ? ' palabra' : ' palabras'));
+        if (uniq) parts.push('tiempo estimado: ' + trFmtMin(est * 0.7) + ' – ' + trFmtMin(est * 1.9));
+        if (analyzing) parts.push('analizando…');
+        if (scanned) parts.push(scanned + ' sin texto (no traducible)');
+        trStatsBar.textContent = parts.join(' · ');
+        trStatsBar.style.display = 'block';
     }
 
     function redrawTrQueue() {
@@ -2804,7 +3171,9 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
             trFiles = trFiles.filter(i => i.id !== id);
             redrawTrQueue();
             updateTrUI();
-        });
+            updateTrStatsBar();
+            trAnalyzeNext();
+        }, trItemMeta);
     }
 
     function updateTrUI() {
@@ -2833,6 +3202,8 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         optionsSectionTr.style.display = 'none';
         progressSectionTr.style.display = 'block';
         resultsSectionTr.style.display = 'none';
+        trCancelBtn.style.display = 'inline-flex';
+        trProgressStats.textContent = '';
         setTrProgress(0, 'Preparando...');
 
         const btnLabel = convertBtnTr.querySelector('.btn-label');
@@ -2843,12 +3214,25 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
 
         trResults = [];
         trFailedSegments = 0;
+        trCancelRequested = false;
+        trStopReason = null;
+        trConsecFails = 0;
         const total = trFiles.length;
         const fmt = trFormatSelector.querySelector('.segment.active').dataset.value;
         const bilingual = bilingualCheckTr.checked;
         const slSetting = sourceLangSelect.value;
         const tl = targetLangSelect.value;
         const failures = [];
+        const t0All = Date.now();
+        let totalPagesDone = 0;
+        let totalWordsDone = 0;
+
+        const fmtEta = (s) => {
+            s = Math.max(0, Math.round(s));
+            const m = Math.floor(s / 60), ss = s % 60;
+            return m + ':' + String(ss).padStart(2, '0');
+        };
+        const fmtInt = (n) => n.toLocaleString('es');
 
         try {
             for (let i = 0; i < total; i++) {
@@ -2856,61 +3240,116 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 const base = (frac, msg) => setTrProgress(((i + frac) / total) * 100, msg);
 
                 try {
-                    // 1) Extraer texto del PDF
-                    base(0.02, `Extrayendo texto — ${item.file.name}`);
-                    const doc = await trExtractPdf(item.file, (f) =>
-                        base(0.02 + f * 0.18, `Extrayendo texto (${Math.round(f * 100)}%) — ${item.file.name}`));
+                    // 1) Obtener el texto del PDF (reutiliza el análisis previo)
+                    let doc = item.doc;
+                    if (doc && doc.hasText) {
+                        base(0.2, 'Texto ya analizado — ' + item.file.name);
+                    } else {
+                        base(0.02, 'Extrayendo texto — ' + item.file.name);
+                        doc = await trExtractPdf(item.file, (f) =>
+                            base(0.02 + f * 0.18, 'Extrayendo texto (' + Math.round(f * 100) + '%) — ' + item.file.name));
+                        item.doc = doc;
+                    }
 
                     if (!doc.hasText) {
-                        throw new Error(`"${item.file.name}" no contiene texto seleccionable (parece un escaneo). El traductor necesita PDFs con texto real.`);
+                        throw new Error('"' + item.file.name + '" no contiene texto seleccionable (parece un escaneo). El traductor necesita PDFs con texto real.');
                     }
 
                     // 2) Detectar idioma de origen si está en automático
                     let sl = slSetting;
                     if (sl === 'auto') {
-                        base(0.22, `Detectando idioma — ${item.file.name}`);
+                        base(0.22, 'Detectando idioma — ' + item.file.name);
                         const sample = doc.pages.map(p => p.paragraphs.join(' ')).join(' ').slice(0, 500);
                         sl = await trDetect(sample);
                     }
                     const srcName = TR_LANG_NAMES[sl] || sl;
                     const dstName = TR_LANG_NAMES[tl] || tl;
 
-                    // 3) Traducir
-                    const transPages = await trTranslatePages(doc.pages, sl, tl, (f) =>
-                        base(0.25 + f * 0.63, `Traduciendo ${srcName} → ${dstName} (${Math.round(f * 100)}%) — ${item.file.name}`));
+                    // 3) Traducir en lotes, con ETA en vivo
+                    const t0File = Date.now();
+                    let lastWords = 0;
+                    const result = await trTranslatePages(doc.pages, sl, tl, (done, tot, wordsDone) => {
+                        lastWords = wordsDone;
+                        const elapsed = (Date.now() - t0File) / 1000;
+                        const eta = done > 0 ? (elapsed / done) * (tot - done) : 0;
+                        trProgressStats.textContent = done + '/' + tot + ' secciones · ~' + fmtEta(eta) + ' restante · ' + fmtInt(wordsDone) + ' palabras';
+                        base(0.25 + (done / Math.max(tot, 1)) * 0.63, 'Traduciendo ' + srcName + ' → ' + dstName + ' — ' + item.file.name);
+                    });
+                    const transPages = result.pages;
 
-                    // 4) Generar documento de salida
-                    base(0.9, `Generando documento — ${item.file.name}`);
+                    // 4) Corte parcial: si se canceló o el servicio dejó de
+                    //    responder, conservar solo las páginas 100% traducidas
+                    //    (el documento se corta limpio hasta donde llegó).
+                    let kept = doc.pages.length;
+                    let cutInfo = null;
+                    if (trStopReason) {
+                        let lastFull = -1;
+                        for (let p = 0; p < doc.pages.length; p++) {
+                            const okp = result.ok[p] || [];
+                            if (doc.pages[p].paragraphs.every((_, qi) => okp[qi])) lastFull = p;
+                            else break;
+                        }
+                        if (lastFull >= 0) kept = lastFull + 1;
+                        cutInfo = { kept: kept, total: doc.pages.length, reason: trStopReason };
+                    }
+
+                    // 5) Generar documento de salida
+                    base(0.9, 'Generando documento — ' + item.file.name);
+                    const outOrig = doc.pages.slice(0, kept);
+                    const outTrans = transPages.slice(0, kept);
+                    if (cutInfo) {
+                        const motivo = cutInfo.reason === 'cancelado'
+                            ? 'detenida por el usuario'
+                            : 'el servicio de traducción dejó de responder';
+                        const notice = cutInfo.kept < cutInfo.total
+                            ? '— TRADUCCIÓN PARCIAL: ' + motivo + '. Se conservan las páginas 1 a ' + cutInfo.kept + ' de ' + cutInfo.total + ' (hasta donde llegó la traducción). Vuelve a ejecutar la traducción para continuar: la caché retoma donde se quedó. —'
+                            : '— AVISO: la traducción se detuvo (' + motivo + '); algunas secciones quedaron en su idioma original. —';
+                        outTrans[outTrans.length - 1].paragraphs.push(notice);
+                    }
+
                     let blob, ext;
                     if (fmt === 'docx') {
-                        blob = await trBuildDocx(doc.pages, transPages, bilingual);
+                        blob = await trBuildDocx(outOrig, outTrans, bilingual);
                         ext = 'docx';
                     } else if (fmt === 'pdf') {
-                        blob = await trBuildPdf(doc.pages, transPages, bilingual);
+                        blob = await trBuildPdf(outOrig, outTrans, bilingual);
                         ext = 'pdf';
                     } else {
-                        blob = trBuildTxt(doc.pages, transPages, bilingual);
+                        blob = trBuildTxt(outOrig, outTrans, bilingual);
                         ext = 'txt';
                     }
 
                     const outName = item.file.name.replace(/\.pdf$/i, '')
-                        + `_trad_${tl}${bilingual ? '_bilingue' : ''}.${ext}`;
+                        + '_trad_' + tl + (bilingual ? '_bilingue' : '') + (cutInfo ? '_parcial' : '') + '.' + ext;
                     trResults.push({ blob, name: outName });
+                    totalPagesDone += kept;
+                    totalWordsDone += lastWords;
                 } catch (err) {
                     console.error('Traducción fallida:', err);
                     failures.push(item.file.name + ': ' + err.message);
                 }
+                if (trCancelRequested) break;   // no iniciar el siguiente archivo
             }
 
+            trCachePersist();
             setTrProgress(100, 'Completado');
             progressSectionTr.style.display = 'none';
+            trCancelBtn.style.display = 'none';
+            trProgressStats.textContent = '';
 
+            const durAll = fmtEta((Date.now() - t0All) / 1000);
             if (trResults.length) {
                 resultsSectionTr.style.display = 'block';
-                resultsMetaTr.textContent = `${trResults.length} archivo${trResults.length !== 1 ? 's' : ''} listo${trResults.length !== 1 ? 's' : ''}`;
+                let meta = trResults.length + ' archivo' + (trResults.length !== 1 ? 's' : '') + ' · ' + totalPagesDone + ' páginas · ' + fmtInt(totalWordsDone) + ' palabras · ' + durAll;
+                if (trStopReason) meta += ' · PARCIAL (' + (trStopReason === 'cancelado' ? 'detenido' : 'servicio') + ')';
+                resultsMetaTr.textContent = meta;
                 renderResultsList(filesListTr, trResults, '#10b981', globeIconSvg());
-                if (trFailedSegments > 0) {
-                    showToast(`${trFailedSegments} sección(es) no se pudieron traducir y se conservaron en el idioma original`, 'error');
+                if (trStopReason === 'cancelado') {
+                    showToast('Traducción detenida: documento parcial guardado hasta donde llegó', '');
+                } else if (trStopReason === 'servicio') {
+                    showToast('El servicio de traducción dejó de responder: documento parcial guardado. Reintenta para continuar desde la caché.', 'error');
+                } else if (trFailedSegments > 0) {
+                    showToast(trFailedSegments + ' sección(es) no se pudieron traducir y se conservaron en el idioma original', 'error');
                 } else {
                     showToast('Traducción completada', 'success');
                 }
@@ -2918,13 +3357,14 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 optionsSectionTr.style.display = 'block';
             }
             if (failures.length) {
-                showToast(failures[0] + (failures.length > 1 ? ` (y ${failures.length - 1} error${failures.length > 2 ? 'es' : ''} más)` : ''), 'error');
+                showToast(failures[0] + (failures.length > 1 ? ' (y ' + (failures.length - 1) + ' error' + (failures.length > 2 ? 'es' : '') + ' más)' : ''), 'error');
             }
         } catch (err) {
             console.error(err);
             showToast('Error inesperado: ' + err.message, 'error');
             optionsSectionTr.style.display = 'block';
             progressSectionTr.style.display = 'none';
+            trCancelBtn.style.display = 'none';
         } finally {
             isConvertingTr = false;
             btnLabel.style.display = 'inline';
@@ -2943,5 +3383,8 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         progressSectionTr.style.display = 'none';
         resultsSectionTr.style.display = 'none';
         setTrProgress(0, '');
+        trProgressStats.textContent = '';
+        trCancelBtn.style.display = 'none';
+        updateTrStatsBar();
     }
 })();
