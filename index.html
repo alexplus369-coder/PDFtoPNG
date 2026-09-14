@@ -6,7 +6,7 @@
     <title>Conversor PDF ↔ Imagen</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=1">
+    <link rel="stylesheet" href="css/style.css?v=2">
 <base target="_blank">
 </head>
 <body>
@@ -77,6 +77,14 @@
                     <path d="M21 15.5h-5.5m0 0 2.2-2.2m-2.2 2.2 2.2 2.2"/>
                 </svg>
                 PDF a Word
+            </button>
+            <button class="mode-btn" data-mode="translatepdf">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="2" y1="12" x2="22" y2="12"/>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                </svg>
+                Traducir PDF
             </button>
         </div>
 
@@ -851,6 +859,195 @@
                     <div class="pages-list" id="filesListP2W"></div>
                 </section>
             </div>
+
+            <!-- ==================== MODO: TRADUCIR PDF ==================== -->
+            <div id="translatePdfPanel" style="display:none;">
+                <section class="upload-section" id="uploadSectionTr">
+                    <div class="drop-zone" id="dropZoneTr">
+                        <input type="file" id="fileInputTr" accept=".pdf" multiple hidden>
+                        <div class="drop-content">
+                            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="2" y1="12" x2="22" y2="12"/>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                            </svg>
+                            <p class="drop-title">Arrastra uno o más PDFs aquí</p>
+                            <p class="drop-hint">o haz clic para seleccionar · Extrae el texto, lo traduce y genera el documento</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="options-section" id="optionsSectionTr" style="display:none;">
+                    <div class="file-bar">
+                        <div class="file-meta">
+                            <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            <span class="file-name" id="fileNameTr">0 archivos seleccionados</span>
+                        </div>
+                        <input type="file" id="addMoreInputTr" accept=".pdf" multiple hidden>
+                        <button class="btn-icon" id="addMoreFileTr" title="Agregar más PDFs">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                        </button>
+                        <button class="btn-icon" id="removeFileTr" title="Limpiar todo">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="sort-bar" style="display:flex;gap:0.6rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+                        <label style="font-size:0.85rem;color:var(--muted);font-weight:500;">Ordenar por:</label>
+                        <select class="sort-select" id="trSortSelect" style="padding:0.4rem 0.7rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.85rem;outline:none;cursor:pointer;">
+                            <option value="name-asc">Nombre (A → Z)</option>
+                            <option value="name-desc">Nombre (Z → A)</option>
+                            <option value="date-asc">Fecha (más antiguo primero)</option>
+                            <option value="date-desc">Fecha (más reciente primero)</option>
+                            <option value="size-asc">Tamaño (menor primero)</option>
+                            <option value="size-desc">Tamaño (mayor primero)</option>
+                        </select>
+                    </div>
+                    <div class="image-queue" id="trQueue"></div>
+
+                    <div class="lang-row">
+                        <div class="field lang-field">
+                            <label for="sourceLangSelect">Idioma de origen</label>
+                            <select id="sourceLangSelect">
+                                <option value="auto" selected>Auto detectar</option>
+                                <option value="es">Español</option>
+                                <option value="en">Inglés</option>
+                                <option value="fr">Francés</option>
+                                <option value="de">Alemán</option>
+                                <option value="it">Italiano</option>
+                                <option value="pt">Portugués</option>
+                                <option value="ca">Catalán</option>
+                                <option value="gl">Gallego</option>
+                                <option value="eu">Euskera</option>
+                                <option value="nl">Neerlandés</option>
+                                <option value="ru">Ruso</option>
+                                <option value="uk">Ucraniano</option>
+                                <option value="pl">Polaco</option>
+                                <option value="ro">Rumano</option>
+                                <option value="tr">Turco</option>
+                                <option value="sv">Sueco</option>
+                                <option value="zh-CN">Chino (simplificado)</option>
+                                <option value="ja">Japonés</option>
+                                <option value="ko">Coreano</option>
+                                <option value="ar">Árabe</option>
+                                <option value="hi">Hindi</option>
+                            </select>
+                        </div>
+                        <button class="swap-btn" id="swapLangBtn" title="Intercambiar idiomas">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <polyline points="17 1 21 5 17 9"/>
+                                <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                                <polyline points="7 23 3 19 7 15"/>
+                                <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                            </svg>
+                        </button>
+                        <div class="field lang-field">
+                            <label for="targetLangSelect">Idioma de destino</label>
+                            <select id="targetLangSelect">
+                                <option value="es" selected>Español</option>
+                                <option value="en">Inglés</option>
+                                <option value="fr">Francés</option>
+                                <option value="de">Alemán</option>
+                                <option value="it">Italiano</option>
+                                <option value="pt">Portugués</option>
+                                <option value="ca">Catalán</option>
+                                <option value="gl">Gallego</option>
+                                <option value="eu">Euskera</option>
+                                <option value="nl">Neerlandés</option>
+                                <option value="ru">Ruso</option>
+                                <option value="uk">Ucraniano</option>
+                                <option value="pl">Polaco</option>
+                                <option value="ro">Rumano</option>
+                                <option value="tr">Turco</option>
+                                <option value="sv">Sueco</option>
+                                <option value="zh-CN">Chino (simplificado)</option>
+                                <option value="ja">Japonés</option>
+                                <option value="ko">Coreano</option>
+                                <option value="ar">Árabe</option>
+                                <option value="hi">Hindi</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="settings-grid">
+                        <div class="field">
+                            <label>Formato de salida</label>
+                            <div class="segmented" id="trFormatSelector">
+                                <button class="segment active" data-value="docx">Word</button>
+                                <button class="segment" data-value="pdf">PDF</button>
+                                <button class="segment" data-value="txt">TXT</button>
+                            </div>
+                        </div>
+
+                        <div class="field checkbox-field">
+                            <label class="checkbox-label" for="bilingualCheckTr">
+                                <input type="checkbox" id="bilingualCheckTr">
+                                <span>Documento bilingüe (incluye el texto original encima de la traducción)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <p class="tr-note">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="16" x2="12" y2="12"/>
+                            <line x1="12" y1="8" x2="12.01" y2="8"/>
+                        </svg>
+                        A diferencia del resto de herramientas, la traducción necesita conexión a internet: el texto se envía a un servicio gratuito de traducción (Google Translate o MyMemory). Tus documentos nunca se almacenan en ningún servidor.
+                    </p>
+
+                    <div class="actions">
+                        <button class="btn-primary" id="convertBtnTr">
+                            <span class="btn-label">Traducir documento</span>
+                            <span class="btn-spinner" style="display:none;">
+                                <svg class="spin" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="60" stroke-dashoffset="20"/>
+                                </svg>
+                                Traduciendo...
+                            </span>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="progress-section" id="progressSectionTr" style="display:none;">
+                    <div class="progress-card">
+                        <div class="progress-header">
+                            <span class="progress-title" id="progressTitleTr">Traduciendo...</span>
+                            <span class="progress-percent" id="progressPercentTr">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="progressFillTr" style="width:0%"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="results-section" id="resultsSectionTr" style="display:none;">
+                    <div class="results-toolbar">
+                        <div class="results-info">
+                            <h2>Traducción lista</h2>
+                            <p id="resultsMetaTr">0 archivos listos</p>
+                        </div>
+                        <button class="btn-secondary" id="downloadZipBtnTr">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Descargar ZIP
+                        </button>
+                    </div>
+                    <div class="pages-list" id="filesListTr"></div>
+                </section>
+            </div>
         </main>
 
         <footer class="footer">
@@ -869,6 +1066,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <script src="js/app.js?v=1"></script>
+    <script src="js/app.js?v=2"></script>
 </body>
 </html>
