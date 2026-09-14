@@ -2756,6 +2756,53 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     const TR_OCR_MIN_CHARS = 40;   // menos caracteres por página ⇒ escaneada
     const TR_OCR_SECS_PAGE = 7;    // estimación s/página (para la ETA)
     const TR_OCR_MAX_LINES_PARA = 10; // parte párrafos gigantes (columnas)
+    const TR_OCR_MIN_WORD_CONF = 55;  // confianza mínima de palabra (el ruido de ilustraciones suele quedar < 55)
+
+    // Detecta líneas OCR que son RUIDO leído sobre ilustraciones, capturas
+    // de pantalla, filigranas o fuentes decorativas (el caso típico: libros
+    // ilustrados). Criterios: proporción de letras, proporción de vocales
+    // (todo idioma real ronda 30-45 %), palabras sin vocales, letras sueltas
+    // y mezclas implausibles de mayúsculas y dígitos. Ante la duda se
+    // descarta: mejor queda una zona sin traducir que una caja de basura
+    // tapando el diseño.
+    function trOcrLineIsGarbage(text) {
+        const VOW = /[aeiou\u00E0-\u00FC\u03B1\u03B5\u03B7\u03B9\u03BF\u03C5\u03C9\u0430\u0435\u0438\u043E\u0443\u044B\u044F\u0451]/;
+        const t = String(text || '').replace(/\s+/g, ' ').trim();
+        if (t.length < 3) return true;
+        let letters = 0, weird = 0, nonspace = 0;
+        for (const ch of t) {
+            if (/\s/.test(ch)) continue;
+            nonspace++;
+            if (/[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF]/.test(ch)) letters++;
+            else if (!/[0-9.,;:!?\u00A1\u00BF'"()\-\u2013\u2014&%\u20AC\u00A3\u00AB\u00BB\u2026]/.test(ch)) weird++;
+        }
+        if (!nonspace) return true;
+        if (letters / nonspace < 0.55) return true;        // demasiado símbolo/número
+        if (weird >= 3 && weird / nonspace > 0.08) return true;
+        const low = t.toLowerCase();
+        let vow = 0, onlyLetters = 0;
+        for (const ch of low) {
+            if (/[a-z\u00E0-\u00FC\u03B1-\u03C9\u0430-\u044F]/.test(ch)) {
+                onlyLetters++;
+                if (VOW.test(ch)) vow++;
+            }
+        }
+        if (onlyLetters >= 8 && vow / onlyLetters < 0.2) return true;   // p. ej. «NIN DET TRZS»
+        const words = t.split(/\s+/);
+        let bad = 0, real = 0;
+        words.forEach(w => {
+            const wl = w.toLowerCase().replace(/[^a-z\u00E0-\u00FC\u03B1-\u03C9\u0430-\u044F]/g, '');
+            if (wl.length >= 2 && !VOW.test(wl)) { bad++; return; }   // racimos sin vocales: RL, ZA, TRZS
+            if (wl.length === 1 && !'aeiou\u00E1\u00E9\u00ED\u00F3\u00FAy'.includes(wl) && !/\d/.test(w)) { bad++; return; }
+            real++;
+        });
+        if (real === 0) return true;
+        if (words.length >= 2 && bad / words.length > 0.34) return true;
+        if (words.length === 1 && bad === 1) return true;
+        const caps = words.filter(w => /^[A-Z\u00C0-\u00DE0-9]{1,3}$/.test(w)).length;
+        if (words.length >= 4 && caps / words.length > 0.5) return true;   // «A 4 Mar M7 ZA 7»
+        return false;
+    }
     let trOcrLibPromise = null;    // descarga única de Tesseract.js
     const trOcrWorkers = new Map(); // idioma → worker reutilizable
     let trOcrStatusCb = null;      // callback de progreso del motor
@@ -2813,6 +2860,35 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         trOcrWorkers.clear();
     }
 
+    // Fusiona la página digital (texto real del PDF) con la página OCR:
+    // el texto digital se conserva SIEMPRE intacto y solo se añaden los
+    // bloques OCR que no solapen con él. Así «Siempre OCR» completa las
+    // zonas sin detectar sin degradar el texto que ya era bueno, y en
+    // modo automático las páginas casi vacías no pierden sus restos de
+    // texto real (números de página, pies…).
+    function trMergeOcrPage(digPg, ocrPg) {
+        const digGeos = (digPg && digPg.geo) || [];
+        const digTexts = (digPg && digPg.paragraphs) || [];
+        const out = { paragraphs: digTexts.slice(), geo: digGeos.slice(), ocrDone: true };
+        const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9áéíóúüñàèìòùâêîôûäëïöçãõ]/g, '');
+        (ocrPg.paragraphs || []).forEach((t, i) => {
+            const g = ocrPg.geo && ocrPg.geo[i];
+            if (!g || !t) return;
+            const nt = norm(t);
+            if (nt.length > 15 && digTexts.some(d => norm(d) === nt)) return;   // ya está leído digitalmente
+            const ga = Math.max((g.x1 - g.x0) * (g.yTop - g.yBot), 1);
+            const overlaps = digGeos.some(dg => {
+                if (!dg) return false;
+                const ox = Math.min(dg.x1, g.x1) - Math.max(dg.x0, g.x0);
+                const oy = Math.min(dg.yTop, g.yTop) - Math.max(dg.yBot, g.yBot);
+                if (ox <= 2 || oy <= 2) return false;
+                return (ox * oy) / ga > 0.35;   // el bloque digital ya cubre esa zona
+            });
+            if (!overlaps) { out.paragraphs.push(t); out.geo.push(g); }
+        });
+        return out;
+    }
+
     // Reconstruye párrafos desde la salida de Tesseract. Importante: el
     // LSTM de Tesseract a veces FUSIONA columnas en una misma línea, así
     // que no se confía en sus párrafos: se reconstruye todo desde las
@@ -2826,11 +2902,12 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const raw = [];
         const takeWord = (w) => {
             if (!w || !w.bbox) return;
-            const t = String(w.text || '').replace(/\s+/g, '').trim();
+            const t = String(w.text || '').replace(/\s+/g, ' ').trim();
             if (!t) return;
-            if (w.confidence != null && w.confidence < 35) return;
-            if (/^[\W_]$/.test(t)) return;   // un símbolo suelto (·, |, .)
-            raw.push({ text: t, bbox: w.bbox });
+            if (w.confidence != null && w.confidence < TR_OCR_MIN_WORD_CONF) return;   // ruido de ilustraciones
+            if (/^[\W_]+$/.test(t) && !/\d/.test(t)) return;   // solo símbolos (·, |, ==(, '()…)
+            if (w.bbox.y1 - w.bbox.y0 < 5) return;             // mota/polvo más pequeño que cualquier texto
+            raw.push({ text: t, bbox: w.bbox, conf: (w.confidence != null) ? w.confidence : null });
         };
         if (Array.isArray(data.blocks) && data.blocks.length) {
             data.blocks.forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l => (l.words || []).forEach(takeWord))));
@@ -2842,9 +2919,10 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 if (!l || !l.bbox) return;
                 const t = String(l.text || '').replace(/\s+/g, ' ').trim();
                 if (!t || t.length < 2) return;
-                if (l.confidence != null && l.confidence < 35) return;
+                if (l.confidence != null && l.confidence < 50) return;
                 if (/^[\W_]+$/.test(t) && !/\d/.test(t)) return;
-                raw.push({ text: t, bbox: l.bbox });
+                if (trOcrLineIsGarbage(t)) return;
+                raw.push({ text: t, bbox: l.bbox, conf: (l.confidence != null) ? l.confidence : null });
             });
         }
         if (!raw.length) return [];
@@ -2854,6 +2932,15 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const minX = Math.min.apply(null, raw.map(w => w.bbox.x0));
         const maxX = Math.max.apply(null, raw.map(w => w.bbox.x1));
         const contentW = Math.max(maxX - minX, 1);
+
+        // palabras-fantasma: manchas, ornamentos o filigranas leídas como
+        // «palabras» enormes de 1-3 caracteres (distorsionan la canaleta y
+        // acaban creando cajas gigantes)
+        for (let i = raw.length - 1; i >= 0; i--) {
+            const w = raw[i];
+            if ((w.bbox.x1 - w.bbox.x0) > contentW * 0.7 && w.text.replace(/\s/g, '').length <= 3) raw.splice(i, 1);
+        }
+        if (!raw.length) return [];
 
         // 2) canaletas verticales: proyección X ignorando palabras anchas
         const wideW = contentW * 0.55;   // ≥ esto = título/banner a todo lo ancho
@@ -2912,7 +2999,25 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         }
         buckets.sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
 
-        // 4) por cubo: palabras → líneas (banda Y) → párrafos (proximidad)
+        // 4) por cubo: palabras → líneas (banda Y) → párrafos (proximidad).
+        // Dentro de cada línea se LIMPIAN las palabras-ruido individuales
+        // (racimos sin vocales leídos sobre la ilustración que comparten
+        // banda Y con texto real): la línea se reconstruye solo con las
+        // palabras fiables y su caja se recalcula con ellas.
+        const VOW = /[aeiou\u00E0-\u00FC\u03B1\u03B5\u03B7\u03B9\u03BF\u03C5\u03C9\u0430\u0435\u0438\u043E\u0443\u044B\u044F\u0451]/;
+        const wordIsNoise = (t, conf) => {
+            const s = String(t || '');
+            const wl = s.toLowerCase().replace(/[^a-z\u00E0-\u00FC\u03B1-\u03C9\u0430-\u044F]/g, '');
+            if (!wl) return !/\d/.test(s);   // sin letras: ruido salvo números
+            if (wl.length >= 2 && !VOW.test(wl)) return true;
+            if (wl.length === 1 && !'aeiou\u00E1\u00E9\u00ED\u00F3\u00FAy'.includes(wl) && !/\d/.test(s)) return true;
+            // token corto EN MAYÚSCULAS con confianza mediocre (p. ej. «NIN»,
+            // «DET», «M7» leídos sobre una ilustración): casi nunca es texto
+            // real; los rótulos verdaderos suelen leerse con confianza alta
+            if (conf != null && conf < 72 && s.length <= 6 && !/[a-z\u00E0-\u00FC]/.test(s)
+                && s.replace(/[^A-Za-z0-9\u00C0-\u00DE]/g, '').length >= 2) return true;
+            return false;
+        };
         const groups = [];
         buckets.forEach(bk => {
             const ws = bk.words.slice().sort((a, b) => (a.bbox.y0 - b.bbox.y0) || (a.bbox.x0 - b.bbox.x0));
@@ -2930,12 +3035,14 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
             });
             const lineObjs = lines.map(l => {
                 l.ws.sort((a, b) => a.bbox.x0 - b.bbox.x0);
-                const bx0 = Math.min.apply(null, l.ws.map(w => w.bbox.x0));
-                const bx1 = Math.max.apply(null, l.ws.map(w => w.bbox.x1));
-                const by0 = Math.min.apply(null, l.ws.map(w => w.bbox.y0));
-                const by1 = Math.max.apply(null, l.ws.map(w => w.bbox.y1));
-                return { text: l.ws.map(w => w.text).join(' '), bbox: { x0: bx0, y0: by0, x1: bx1, y1: by1 } };
-            });
+                const clean = l.ws.filter(w => !wordIsNoise(w.text, w.conf));
+                if (!clean.length) return null;   // la línea era 100 % ruido
+                const bx0 = Math.min.apply(null, clean.map(w => w.bbox.x0));
+                const bx1 = Math.max.apply(null, clean.map(w => w.bbox.x1));
+                const by0 = Math.min.apply(null, clean.map(w => w.bbox.y0));
+                const by1 = Math.max.apply(null, clean.map(w => w.bbox.y1));
+                return { text: clean.map(w => w.text).join(' '), bbox: { x0: bx0, y0: by0, x1: bx1, y1: by1 } };
+            }).filter(l => l && !trOcrLineIsGarbage(l.text));   // mata el ruido leído sobre ilustraciones
             let curPara = null, curBox = null;
             lineObjs.forEach(l => {
                 const b = l.bbox;
@@ -2966,6 +3073,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     function trOcrBuildPage(groups, vp) {
         const paragraphs = [];
         const geoList = [];
+        const pageArea = Math.max(1, vp.width * vp.height);
         groups.forEach(lines => {
             for (let start = 0; start < lines.length; start += TR_OCR_MAX_LINES_PARA) {
                 const chunk = lines.slice(start, start + TR_OCR_MAX_LINES_PARA);
@@ -2981,6 +3089,26 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 });
                 const text = texts.join(' ').replace(/\s+/g, ' ').trim();
                 if (!text) continue;
+                // ---- sanidad del bloque: mata las «cajas exageradas» ----
+                // Un bloque real de texto tiene las líneas apretadas dentro
+                // de su caja; el ruido de una ilustración queda DISPERSO
+                // (poca densidad de caracteres y líneas que no llenan la
+                // caja). Ante la duda se descarta y la zona original queda
+                // intacta (mejor sin traducir que tapada con basura).
+                const cbx0 = Math.min.apply(null, chunk.map(l => l.bbox.x0));
+                const cbx1 = Math.max.apply(null, chunk.map(l => l.bbox.x1));
+                const cby0 = Math.min.apply(null, chunk.map(l => l.bbox.y0));
+                const cby1 = Math.max.apply(null, chunk.map(l => l.bbox.y1));
+                const bw = Math.max(cbx1 - cbx0, 1), bh = Math.max(cby1 - cby0, 1);
+                const areaPx = bw * bh;
+                const dens = text.length / areaPx;            // caracteres por px²
+                const linesArea = chunk.reduce((s, l) =>
+                    s + Math.max(0, l.bbox.x1 - l.bbox.x0) * Math.max(0, l.bbox.y1 - l.bbox.y0), 0);
+                const fill = linesArea / areaPx;              // cuánta caja llenan las líneas
+                if (!/\d/.test(text) && text.length < 4) continue;          // fragmento inútil
+                if (dens < 0.0008) continue;                  // muy disperso ⇒ ruido de imagen
+                if (fill < 0.25 && areaPx > pageArea * 0.03) continue;      // líneas dispersas en caja grande
+                if (bh > vp.height * 0.45 && fill < 0.5) continue;          // media página y hueca
                 const ls = chunk.map(l => {
                     const a = vp.convertToPdfPoint(l.bbox.x0, l.bbox.y0);
                     const b = vp.convertToPdfPoint(l.bbox.x1, l.bbox.y1);
@@ -3060,6 +3188,16 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         trOcrStatusCb = null;
         return out;
     }
+
+    // Hook de depuración/pruebas (no interfiere en la app): permite validar
+    // los filtros OCR desde la consola o tests automatizados.
+    window.__trOcrDebug = {
+        lineIsGarbage: trOcrLineIsGarbage,
+        paragraphsFromData: trOcrParagraphsFromData,
+        buildPage: trOcrBuildPage,
+        mergePage: trMergeOcrPage,
+        MIN_WORD_CONF: TR_OCR_MIN_WORD_CONF
+    };
 
     // ===== Control de parada =====
     let trCancelRequested = false;    // usuario pulsó "Detener"
@@ -3483,15 +3621,38 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 const d = cctx.getImageData(px, py, 1, 1).data;
                 return [d[0] / 255, d[1] / 255, d[2] / 255];
             };
+            // Color de fondo real del bloque: se muestrea DENTRO de la caja
+            // (esquinas interiores, centro y huecos entre renglones, que son
+            // papel puro) y se vota el color cuantizado más frecuente. Antes
+            // se muestreaba FUERA y sobre ilustraciones devolvía colores del
+            // arte (beige/marrón), tapando el diseño con cajas exageradas.
             const bgColor = (g) => {
-                const cands = [];
-                const c1 = sampleBG(g.x0 - 4, (g.yTop + g.yBot) / 2);
-                const c2 = sampleBG(g.x1 + 4, (g.yTop + g.yBot) / 2);
-                const c3 = sampleBG((g.x0 + g.x1) / 2, g.yTop + g.size * 0.7);
-                [c1, c2, c3].forEach(c => { if (c) cands.push(c); });
-                if (!cands.length) return [1, 1, 1];
-                cands.sort((a, b) => (b[0] + b[1] + b[2]) - (a[0] + a[1] + a[2]));
-                return cands[0];   // el más claro = fondo (el texto es más oscuro)
+                if (!cctx) return [1, 1, 1];
+                const bw = Math.max(g.x1 - g.x0, 1), bh = Math.max(g.yTop - g.yBot, 1);
+                const pts = [];
+                [0.12, 0.5, 0.88].forEach(a => [0.15, 0.5, 0.85].forEach(b =>
+                    pts.push([g.x0 + bw * a, g.yBot + bh * b])));
+                const nl = Math.max(1, Math.min(g.n || 1, 6));
+                for (let i = 1; i < nl; i++) pts.push([g.x0 + bw * 0.5, g.yBot + (bh * i) / nl]);
+                const votes = new Map();
+                pts.forEach(p => {
+                    const c = sampleBG(p[0], p[1]);
+                    if (!c) return;
+                    const lum = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+                    const key = Math.round(c[0] * 12) + ',' + Math.round(c[1] * 12) + ',' + Math.round(c[2] * 12);
+                    const v = votes.get(key);
+                    if (v) { v.n++; v.lum = Math.max(v.lum, lum); }
+                    else votes.set(key, { n: 1, c: c, lum: lum });
+                });
+                if (!votes.size) return [1, 1, 1];
+                let best = null;
+                votes.forEach(v => { if (!best || v.n > best.n || (v.n === best.n && v.lum > best.lum)) best = v; });
+                if (best.lum < 0.35) {   // dominante oscuro (texto sobre arte): usa el punto más claro
+                    let bright = best;
+                    votes.forEach(v => { if (v.lum > bright.lum) bright = v; });
+                    if (bright.lum > best.lum + 0.15) best = bright;
+                }
+                return best.c;
             };
 
             const oPage = origPages[p], tPage = transPages[p];
@@ -3538,7 +3699,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     const nO = bilingual && orig ? trWrapPdf(orig, F.reg, fsO, boxW).length : 0;
                     const leadT = (fs === geo.size && geo.n > 1 && !nO) ? geo.leading : fs * 1.25;
                     const needH = nO * (fsO * 1.22) + (nO ? fs * 0.35 : 0) + lines.length * leadT;
-                    if (needH <= boxH || fs <= geo.size * 0.55) break;
+                    if (needH <= boxH || fs <= geo.size * 0.5) break;
                     fs *= 0.94;
                     fontT = pick(negrita, geo.italic);
                     lines = trWrapPdf(trans, fontT, fs, boxW);
@@ -3886,9 +4047,10 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     }
 
                     // 1b) OCR: lee el texto de las páginas escaneadas (o de
-                    //     todas si el usuario fuerza «Siempre OCR»). Las páginas
-                    //     leídas sustituyen a las de la capa de texto y usan el
-                    //     mismo formato, así que el resto del flujo no cambia.
+                    //     todas si el usuario fuerza «Siempre OCR»). El
+                    //     resultado se FUSIONA con la capa digital: el texto
+                    //     real se conserva y solo se añaden las zonas que
+                    //     faltaban, así el resto del flujo no cambia.
                     const ocrMode = trOcrMode();
                     const ocrPages = trOcrNeededPages(doc, ocrMode);
                     if (ocrPages.length) {
@@ -3901,7 +4063,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                                 trProgressStats.textContent = 'OCR ' + Math.min(done + 1, tot) + '/' + tot
                                     + ' páginas · ' + fase + ' ' + Math.round(frac * 100) + '%';
                             });
-                        ocrMap.forEach((pg, idx) => { doc.pages[idx] = pg; });
+                        ocrMap.forEach((pg, idx) => { doc.pages[idx] = trMergeOcrPage(doc.pages[idx], pg); });
                     }
 
                     const totalParas = doc.pages.reduce((a, p) => a + (p.paragraphs ? p.paragraphs.length : 0), 0);
