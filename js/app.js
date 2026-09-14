@@ -2307,7 +2307,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     // ===== Configuración del traductor =====
     const TR_MAX_FILE_MB = 50;                          // peso máximo por PDF (MB)
     const TR_MAX_FILE_BYTES = TR_MAX_FILE_MB * 1024 * 1024;
-    const TR_PROXY_URL = 'https://pd-fto-png.vercel.app/api/translate';                            // opcional: URL de un proxy propio en Vercel (ver carpeta opcional-vercel/)
+    const TR_PROXY_URL = 'https://pd-fto-png.vercel.app/api/translate'; // proxy propio desplegado en Vercel (api/translate.js en la raíz del repo). Déjalo en '' para usar solo servicios públicos
     const TR_BATCH_MAX = 8;                             // párrafos máximo por petición (lote)
     const TR_CONSEC_FAILS_STOP = 5;                     // fallos consecutivos antes de cortar el documento
     const TR_CACHE_KEY = 'pdftools_trcache_v1';
@@ -2610,6 +2610,59 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         return out.replace(/\s+/g, ' ').trim();
     }
 
+    // Geometría de un párrafo a partir de sus líneas (coordenadas PDF,
+    // origen abajo-izquierda, mismas que usa pdf-lib).
+    function buildParaGeo(ls) {
+        if (!ls.length) return null;
+        const n = ls.length;
+        const x0 = Math.min.apply(null, ls.map(l => l.x));
+        const x1 = Math.max.apply(null, ls.map(l => l.x + l.w));
+        const sizes = ls.map(l => l.h).slice().sort((a, b) => a - b);
+        const size = sizes[Math.floor(sizes.length / 2)] || 10;
+        const yTop = Math.max.apply(null, ls.map(l => l.y));
+        const yBot = Math.min.apply(null, ls.map(l => l.y));
+        const bold = ls.filter(l => l.bold).length * 2 >= n;
+        const italic = ls.filter(l => l.italic).length * 2 >= n;
+        const leading = n > 1 ? (yTop - yBot) / (n - 1) : size * 1.3;
+        return { x0: x0, x1: x1, yTop: yTop, yBot: yBot, size: size,
+            leading: Math.max(leading, size * 1.05), bold: bold, italic: italic, n: n };
+    }
+
+    // Divide una línea en celdas según huecos internos grandes (tablas,
+    // índices con puntos, maquetas multi-columna). Un hueco mayor que el
+    // cuerpo de la fuente casi nunca es un espacio de palabra normal.
+    function splitLineIntoCells(line) {
+        const cells = [];
+        let cur = null;
+        line.items.forEach(it => {
+            const h = it.height || line.avgHeight || 10;
+            const blank = !/\S/.test(it.str);
+            const w = it.width || 0;
+            // Un espacio en blanco anormalmente ancho separa columnas de
+            // tabla/índice: cierra la celda actual (gap real oculto tras él).
+            if (blank && w > Math.max(h * 1.2, 9)) { cur = null; return; }
+            const gap = cur ? it.x - cur.x1 : Infinity;
+            if (cur && gap <= Math.max(h * 0.95, 7)) {
+                if (gap > h * 0.15 && !/^\s/.test(it.str) && !/\s$/.test(cur.text)) cur.text += ' ';
+                cur.text += it.str;
+                cur.x1 = it.x + it.width;
+                if (h > cur.h) cur.h = h;
+                const f = (it.fontName || '').toLowerCase();
+                if (f.indexOf('bold') !== -1) cur.bold = true;
+                if (f.indexOf('italic') !== -1 || f.indexOf('oblique') !== -1) cur.ital = true;
+            } else if (blank) {
+                return;   // espacio suelto fuera de celda
+            } else {
+                const f = (it.fontName || '').toLowerCase();
+                cur = { text: it.str, x0: it.x, x1: it.x + it.width, h: h,
+                    bold: f.indexOf('bold') !== -1,
+                    ital: f.indexOf('italic') !== -1 || f.indexOf('oblique') !== -1 };
+                cells.push(cur);
+            }
+        });
+        return cells;
+    }
+
     async function trExtractPdf(file, onProgress) {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -2622,32 +2675,68 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
             const lines = groupTextItemsIntoLines(textContent.items);
 
             const paragraphs = [];
+            const geoList = [];
             let buf = '';
+            let bufLines = [];
             let prevY = null;
 
+            const pushPara = () => {
+                if (buf.trim()) {
+                    paragraphs.push(buf.trim());
+                    geoList.push(buildParaGeo(bufLines));
+                }
+                buf = '';
+                bufLines = [];
+            };
+
             lines.forEach(line => {
+                const cells = splitLineIntoCells(line);
                 const text = trLineText(line);
                 if (prevY !== null && (prevY - line.y) > line.avgHeight * 1.9) {
-                    if (buf.trim()) paragraphs.push(buf.trim());
-                    buf = '';
+                    pushPara();
                 }
-                if (text) {
+                if (text && cells.length >= 2) {
+                    // fila tipo tabla/índice: cada celda es su propio párrafo
+                    pushPara();
+                    cells.forEach(c => {
+                        const t = c.text.replace(/\s+/g, ' ').trim();
+                        if (!t) return;
+                        paragraphs.push(t);
+                        geoList.push({
+                            x0: c.x0, x1: c.x1, yTop: line.y, yBot: line.y,
+                            size: c.h, leading: c.h * 1.3, bold: c.bold, italic: c.ital, n: 1
+                        });
+                    });
+                    buf = '';
+                    bufLines = [];
+                } else if (text) {
                     // reconstruir palabras cortadas por guion al final de línea
                     if (buf.endsWith('-') && /^[a-záéíóúñüàèìòùâêîôûäëïöçãõ]./.test(text)) {
                         buf = buf.replace(/-$/, '') + text;
                     } else {
                         buf = buf ? buf + ' ' + text : text;
                     }
+                    // geometría de la línea (posición, ancho, negrita/cursiva)
+                    let lx0 = Infinity, lx1 = -Infinity, lBold = false, lItal = false;
+                    line.items.forEach(it => {
+                        const f = (it.fontName || '').toLowerCase();
+                        if (it.x < lx0) lx0 = it.x;
+                        if (it.x + it.width > lx1) lx1 = it.x + it.width;
+                        if (f.indexOf('bold') !== -1) lBold = true;
+                        if (f.indexOf('italic') !== -1 || f.indexOf('oblique') !== -1) lItal = true;
+                    });
+                    if (lx1 > -Infinity) {
+                        bufLines.push({ x: lx0, y: line.y, w: lx1 - lx0, h: line.avgHeight, bold: lBold, italic: lItal });
+                    }
                 } else if (buf.trim()) {
-                    paragraphs.push(buf.trim());
-                    buf = '';
+                    pushPara();
                 }
                 prevY = line.y;
             });
-            if (buf.trim()) paragraphs.push(buf.trim());
+            pushPara();
 
             paragraphs.forEach(p => { totalChars += p.length; });
-            pages.push({ paragraphs });
+            pages.push({ paragraphs: paragraphs, geo: geoList });
             if (onProgress) onProgress(pageNum / pdf.numPages);
         }
 
@@ -2964,6 +3053,217 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         return pdf.output('blob');
     }
 
+    // ---------- Generador PDF fiel al diseño original (pdf-lib) ----------
+    // Reabre el PDF original y sustituye SOLO el texto: tapa cada párrafo
+    // con un rectángulo del color de fondo y escribe la traducción en la
+    // misma posición, reajustando el cuerpo para que quepa. Imágenes,
+    // tablas, vectores, colores y maquetación del original quedan intactos.
+
+    // Idiomas destino compatibles: las fuentes estándar del PDF (Helvetica)
+    // cubren alfabeto latino (WinAnsi). Para CJK/árabe/cirílico se usa el
+    // generador reformateado (canvas), que sí soporta todos los alfabetos.
+    const TR_LAYOUT_LANGS = ['es', 'en', 'fr', 'de', 'it', 'pt', 'ca', 'nl', 'sv', 'da', 'no', 'fi', 'id', 'ms', 'sw', 'tl'];
+
+    // Caracteres WinAnsi por encima de Latin-1 (se conservan sin cambio)
+    const TR_WINANSI_EXTRA = /[\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]/;
+
+    function trSanitizeWinAnsi(s) {
+        s = String(s || '')
+            .replace(/[\u00A0\u2007\u202F\u2009\u0009\u000B\u000C]/g, ' ')
+            .replace(/[\u2018\u2019\u201B\u2032]/g, "'")
+            .replace(/[\u201C\u201D\u2033]/g, '"')
+            .replace(/[\u2013\u2014\u2212]/g, '-')
+            .replace(/\u2026/g, '...');
+        let out = '';
+        for (const ch of s) {
+            const cp = ch.codePointAt(0);
+            if (cp <= 255 || TR_WINANSI_EXTRA.test(ch)) { out += ch; continue; }
+            const d = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            out += (d.length === 1 && d.codePointAt(0) <= 255) ? d : '?';
+        }
+        return out;
+    }
+
+    function trWrapPdf(text, font, fs, maxW) {
+        const words = text.split(/\s+/).filter(Boolean);
+        const lines = [];
+        let line = '';
+        for (let w of words) {
+            while (font.widthOfTextAtSize(w, fs) > maxW && w.length > 1) {
+                let cut = w.length - 1;
+                while (cut > 1 && font.widthOfTextAtSize(w.slice(0, cut) + '-', fs) > maxW) cut--;
+                if (line) { lines.push(line); line = ''; }
+                lines.push(w.slice(0, cut) + '-');
+                w = w.slice(cut);
+            }
+            const test = line ? line + ' ' + w : w;
+            if (font.widthOfTextAtSize(test, fs) > maxW && line) { lines.push(line); line = w; }
+            else line = test;
+        }
+        if (line) lines.push(line);
+        return lines.length ? lines : [''];
+    }
+
+    async function trBuildPdfLayout(file, origPages, transPages, bilingual, onProgress) {
+        if (!window.PDFLib) throw new Error('la librería pdf-lib no está disponible');
+        const { PDFDocument, StandardFonts, rgb } = PDFLib;
+
+        const bytes = await file.arrayBuffer();
+        let pdf;
+        try {
+            pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        } catch (e) {
+            throw new Error('el PDF original no se pudo reabrir con precisión');
+        }
+
+        const F = {
+            reg: await pdf.embedFont(StandardFonts.Helvetica),
+            bold: await pdf.embedFont(StandardFonts.HelveticaBold),
+            ital: await pdf.embedFont(StandardFonts.HelveticaOblique),
+            boldItal: await pdf.embedFont(StandardFonts.HelveticaBoldOblique)
+        };
+        const pick = (b, i) => b ? (i ? F.boldItal : F.bold) : (i ? F.ital : F.reg);
+
+        // Renderiza cada página en un canvas (PDF.js) para MUESTREAR el color
+        // de fondo real de cada bloque: así la tapa del texto original es
+        // invisible incluso sobre fondos de color (cabeceras, tablas, cajas).
+        let pdfjsDoc = null;
+        try {
+            pdfjsDoc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+        } catch (e) { pdfjsDoc = null; }
+
+        const pagesAll = pdf.getPages();
+        const total = Math.min(origPages.length, pagesAll.length);
+        const GRIS = rgb(0.45, 0.45, 0.45);
+        const NEGRO = rgb(0.08, 0.08, 0.08);
+        const ROJO = rgb(0.72, 0.15, 0.15);
+
+        for (let p = 0; p < total; p++) {
+            const page = pagesAll[p];
+            if (page.getRotation().angle % 360 !== 0) {
+                throw new Error('tiene páginas rotadas (no soportado en modo diseño)');
+            }
+            const W = page.getSize().width;
+
+            let cctx = null, cvsW = 0, cvsH = 0;
+            if (pdfjsDoc) {
+                try {
+                    const pj = await pdfjsDoc.getPage(p + 1);
+                    const vp = pj.getViewport({ scale: 1 });
+                    const cvs = document.createElement('canvas');
+                    cvs.width = Math.max(1, Math.ceil(vp.width));
+                    cvs.height = Math.max(1, Math.ceil(vp.height));
+                    const cx = cvs.getContext('2d', { willReadFrequently: true });
+                    await pj.render({ canvasContext: cx, viewport: vp }).promise;
+                    cctx = cx; cvsW = cvs.width; cvsH = cvs.height;
+                } catch (e) { cctx = null; }
+            }
+            const sampleBG = (x, y) => {
+                if (!cctx) return null;
+                const px = Math.min(cvsW - 1, Math.max(0, Math.round(x)));
+                const py = Math.min(cvsH - 1, Math.max(0, Math.round(cvsH - y)));
+                const d = cctx.getImageData(px, py, 1, 1).data;
+                return [d[0] / 255, d[1] / 255, d[2] / 255];
+            };
+            const bgColor = (g) => {
+                const cands = [];
+                const c1 = sampleBG(g.x0 - 4, (g.yTop + g.yBot) / 2);
+                const c2 = sampleBG(g.x1 + 4, (g.yTop + g.yBot) / 2);
+                const c3 = sampleBG((g.x0 + g.x1) / 2, g.yTop + g.size * 0.7);
+                [c1, c2, c3].forEach(c => { if (c) cands.push(c); });
+                if (!cands.length) return [1, 1, 1];
+                cands.sort((a, b) => (b[0] + b[1] + b[2]) - (a[0] + a[1] + a[2]));
+                return cands[0];   // el más claro = fondo (el texto es más oscuro)
+            };
+
+            const oPage = origPages[p], tPage = transPages[p];
+            const geos = (oPage && oPage.geo) || [];
+            const allSizes = geos.filter(Boolean).map(g => g.size).sort((a, b) => a - b);
+            const medSize = allSizes.length ? allSizes[Math.floor(allSizes.length / 2)] : 10;
+
+            const notices = [];
+            for (let qi = 0; qi < tPage.paragraphs.length; qi++) {
+                const tRaw = ((tPage.paragraphs[qi] || '') + '').trim();
+                const oRaw = (((oPage && oPage.paragraphs[qi]) || '') + '').trim();
+                const geo = geos[qi];
+                if (!geo) {
+                    if (tRaw) notices.push(tRaw);   // p. ej. aviso de traducción parcial
+                    continue;
+                }
+                if (!tRaw && !oRaw) continue;
+
+                const orig = trSanitizeWinAnsi(oRaw);
+                const trans = trSanitizeWinAnsi(tRaw) || orig;
+                const negrita = geo.bold || (geo.n === 1 && oRaw.length < 90 && geo.size >= medSize * 1.16);
+
+                const boxW = Math.max(geo.x1 - geo.x0, geo.size * 4);
+                const boxH = (geo.yTop - geo.yBot) + geo.size * 1.35;
+                const centrado = geo.n === 1 && oRaw.length < 90
+                    && Math.abs((geo.x0 + geo.x1) / 2 - W / 2) < Math.max(16, W * 0.035);
+
+                // 1) tapar el texto original con el color de fondo real
+                const bg = bgColor(geo);
+                const padX = 2, padTop = geo.size * 0.85, padBot = geo.size * 0.35;
+                page.drawRectangle({
+                    x: geo.x0 - padX, y: geo.yBot - padBot,
+                    width: boxW + padX * 2,
+                    height: (geo.yTop - geo.yBot) + padTop + padBot,
+                    color: rgb(bg[0], bg[1], bg[2])
+                });
+
+                // 2) ajustar cuerpo y re-lienar la traducción en la caja
+                let fs = geo.size;
+                let fontT = pick(negrita, geo.italic);
+                let lines = trWrapPdf(trans, fontT, fs, boxW);
+                for (let guard = 0; guard < 40; guard++) {
+                    const fsO = bilingual && orig ? Math.max(fs * 0.52, 5) : 0;
+                    const nO = bilingual && orig ? trWrapPdf(orig, F.reg, fsO, boxW).length : 0;
+                    const leadT = (fs === geo.size && geo.n > 1 && !nO) ? geo.leading : fs * 1.25;
+                    const needH = nO * (fsO * 1.22) + (nO ? fs * 0.35 : 0) + lines.length * leadT;
+                    if (needH <= boxH || fs <= geo.size * 0.55) break;
+                    fs *= 0.94;
+                    fontT = pick(negrita, geo.italic);
+                    lines = trWrapPdf(trans, fontT, fs, boxW);
+                }
+
+                // 3) escribir la traducción (nunca se recorta contenido)
+                const fsO = bilingual && orig ? Math.max(fs * 0.52, 5) : 0;
+                const origLines = (bilingual && orig) ? trWrapPdf(orig, F.reg, fsO, boxW) : [];
+                let y = geo.yTop;
+                const putLine = (ln, fnt, size, color) => {
+                    const x = centrado ? geo.x0 + (boxW - fnt.widthOfTextAtSize(ln, size)) / 2 : geo.x0;
+                    page.drawText(ln, { x: x, y: y, size: size, font: fnt, color: color });
+                };
+                for (const ln of origLines) {
+                    putLine(ln, F.reg, fsO, GRIS);
+                    y -= fsO * 1.22;
+                }
+                if (origLines.length) y -= fs * 0.35;
+                const leadT = (fs === geo.size && geo.n > 1 && !origLines.length) ? geo.leading : fs * 1.25;
+                for (const ln of lines) {
+                    putLine(ln, fontT, fs, NEGRO);
+                    y -= leadT;
+                }
+            }
+
+            // avisos (traducción parcial) al pie de la página
+            if (notices.length) {
+                let ny = 30;
+                const txt = trSanitizeWinAnsi(notices.join(' '));
+                for (const ln of trWrapPdf(txt, F.reg, 7.5, W - 64)) {
+                    page.drawText(ln, { x: 32, y: ny, size: 7.5, font: F.reg, color: ROJO });
+                    ny -= 10;
+                    if (ny < 12) break;
+                }
+            }
+
+            if (onProgress) onProgress((p + 1) / total);
+        }
+
+        const out = await pdf.save({ useObjectStreams: false });
+        return new Blob([out], { type: 'application/pdf' });
+    }
+
     function globeIconSvg() {
         return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
             <circle cx="12" cy="12" r="10"/>
@@ -3218,10 +3518,14 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         trStopReason = null;
         trConsecFails = 0;
         const total = trFiles.length;
-        const fmt = trFormatSelector.querySelector('.segment.active').dataset.value;
+        let fmt = trFormatSelector.querySelector('.segment.active').dataset.value;
         const bilingual = bilingualCheckTr.checked;
         const slSetting = sourceLangSelect.value;
         const tl = targetLangSelect.value;
+        if (fmt === 'pdf-layout' && TR_LAYOUT_LANGS.indexOf(tl) === -1) {
+            showToast('El modo «PDF diseño» solo soporta alfabetos latinos como destino; se generará PDF reformateado', 'error');
+            fmt = 'pdf';
+        }
         const failures = [];
         const t0All = Date.now();
         let totalPagesDone = 0;
@@ -3311,6 +3615,17 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     if (fmt === 'docx') {
                         blob = await trBuildDocx(outOrig, outTrans, bilingual);
                         ext = 'docx';
+                    } else if (fmt === 'pdf-layout') {
+                        try {
+                            blob = await trBuildPdfLayout(item.file, outOrig, outTrans, bilingual, (f) =>
+                                base(0.9 + f * 0.08, 'Reconstruyendo el diseño — ' + item.file.name));
+                            ext = 'pdf';
+                        } catch (layoutErr) {
+                            console.warn('pdf-layout → fallback reformateado:', layoutErr);
+                            showToast('«' + item.file.name + '»: ' + layoutErr.message + '; se genera PDF reformateado', 'error');
+                            blob = await trBuildPdf(outOrig, outTrans, bilingual);
+                            ext = 'pdf';
+                        }
                     } else if (fmt === 'pdf') {
                         blob = await trBuildPdf(outOrig, outTrans, bilingual);
                         ext = 'pdf';
@@ -3320,7 +3635,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     }
 
                     const outName = item.file.name.replace(/\.pdf$/i, '')
-                        + '_trad_' + tl + (bilingual ? '_bilingue' : '') + (cutInfo ? '_parcial' : '') + '.' + ext;
+                        + '_trad_' + tl + (fmt === 'pdf-layout' ? '_diseno' : '') + (bilingual ? '_bilingue' : '') + (cutInfo ? '_parcial' : '') + '.' + ext;
                     trResults.push({ blob, name: outName });
                     totalPagesDone += kept;
                     totalWordsDone += lastWords;
