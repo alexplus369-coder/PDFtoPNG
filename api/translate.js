@@ -2,7 +2,7 @@
 // Cadena interna: Google gtx → Google dict-chrome-ex → MyMemory (API oficial).
 // No almacena nada. Solo acepta POST con { text, sl, tl }.
 
-const MYMEMORY_EMAIL = ''; // opcional: tu email duplica la cuota diaria gratuita de MyMemory
+const MYMEMORY_EMAIL = 'a7daga@gmail.com'; // opcional: tu email duplica la cuota diaria gratuita de MyMemory
 
 const TIMEOUT_MS = 6000; // por servicio (3 servicios = 18 s < 20 s del navegador)
 
