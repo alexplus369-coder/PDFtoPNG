@@ -2307,7 +2307,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     // ===== Configuración del traductor =====
     const TR_MAX_FILE_MB = 50;                          // peso máximo por PDF (MB)
     const TR_MAX_FILE_BYTES = TR_MAX_FILE_MB * 1024 * 1024;
-    const TR_PROXY_URL = '';                            // opcional: URL de un proxy propio en Vercel (ver carpeta opcional-vercel/)
+    const TR_PROXY_URL = 'https://pd-fto-png.vercel.app/api/translate';                            // opcional: URL de un proxy propio en Vercel (ver carpeta opcional-vercel/)
     const TR_BATCH_MAX = 8;                             // párrafos máximo por petición (lote)
     const TR_CONSEC_FAILS_STOP = 5;                     // fallos consecutivos antes de cortar el documento
     const TR_CACHE_KEY = 'pdftools_trcache_v1';
