@@ -319,6 +319,20 @@ body {
     line-height: 1.45;
     margin-top: 0.45rem;
 }
+.tr-select {
+    width: 100%;
+    padding: 0.5rem 0.7rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+}
+.tr-select:focus {
+    border-color: var(--primary);
+}
 @media (max-width: 640px) {
     .segmented.wrap-sm {
         flex-wrap: wrap;
