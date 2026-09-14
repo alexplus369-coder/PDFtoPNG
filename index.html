@@ -998,7 +998,7 @@
                                 <option value="siempre">Siempre OCR — si hay zonas sin detectar</option>
                                 <option value="nunca">Nunca — solo texto real del PDF</option>
                             </select>
-                            <p class="field-hint">El OCR (Tesseract, dentro de tu navegador) lee el texto de las páginas escaneadas. «Siempre OCR» es lo recomendado si el PDF tiene zonas sin detectar o texto corrupto. La primera vez descarga el idioma (~10–25 MB, queda en caché).</p>
+                            <p class="field-hint">El OCR (Tesseract, dentro de tu navegador) lee el texto de las páginas escaneadas y lo FILTRA para descartar el ruido de ilustraciones y zonas decorativas: si un bloque no es texto fiable, se deja intacto en lugar de taparlo con basura. El texto real del PDF siempre se conserva y el OCR solo completa lo que falta. Si el documento está en un solo idioma, elígelo solo (sin mezclar): el OCR es más preciso. La primera vez descarga el idioma (~10–25 MB, queda en caché).</p>
                         </div>
 
                         <div class="field">
@@ -1104,6 +1104,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <script src="js/app.js?v=6"></script>
+    <script src="js/app.js?v=7"></script>
 </body>
 </html>
