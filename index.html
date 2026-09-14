@@ -6,7 +6,7 @@
     <title>Conversor PDF ↔ Imagen</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=2">
+    <link rel="stylesheet" href="css/style.css?v=3">
 <base target="_blank">
 </head>
 <body>
@@ -872,7 +872,7 @@
                                 <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                             </svg>
                             <p class="drop-title">Arrastra uno o más PDFs aquí</p>
-                            <p class="drop-hint">o haz clic para seleccionar · Extrae el texto, lo traduce y genera el documento</p>
+                            <p class="drop-hint">o haz clic para seleccionar · Extrae el texto, lo traduce y genera el documento · máx. 50 MB por PDF</p>
                         </div>
                     </div>
                 </section>
@@ -913,6 +913,7 @@
                         </select>
                     </div>
                     <div class="image-queue" id="trQueue"></div>
+                    <div class="tr-stats" id="trStatsBar" style="display:none;"></div>
 
                     <div class="lang-row">
                         <div class="field lang-field">
@@ -1002,7 +1003,7 @@
                             <line x1="12" y1="16" x2="12" y2="12"/>
                             <line x1="12" y1="8" x2="12.01" y2="8"/>
                         </svg>
-                        A diferencia del resto de herramientas, la traducción necesita conexión a internet: el texto se envía a un servicio gratuito de traducción (Google Translate o MyMemory). Tus documentos nunca se almacenan en ningún servidor.
+                        La traducción necesita internet: el texto se envía a servicios gratuitos (cadena Google → Google alternativo → Lingva → MyMemory con pausa adaptativa). Máx. 50 MB por PDF; los escaneados sin texto no son compatibles. Si algo se interrumpe, el documento se corta limpio hasta donde llegó y la caché local retoma la traducción al reintentar.
                     </p>
 
                     <div class="actions">
@@ -1026,6 +1027,13 @@
                         </div>
                         <div class="progress-track">
                             <div class="progress-fill" id="progressFillTr" style="width:0%"></div>
+                        </div>
+                        <div class="tr-progress-stats" id="trProgressStats"></div>
+                        <div style="text-align:center;">
+                            <button class="tr-cancel-btn" id="trCancelBtn" style="display:none;" type="button">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                                Detener y guardar lo traducido
+                            </button>
                         </div>
                     </div>
                 </section>
@@ -1066,6 +1074,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <script src="js/app.js?v=2"></script>
+    <script src="js/app.js?v=3"></script>
 </body>
 </html>
