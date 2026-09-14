@@ -52,6 +52,7 @@
         renamefiles: $('#renameFilesPanel'),
         word2pdf: $('#word2pdfPanel'),
         pdf2word: $('#pdf2wordPanel'),
+        translatepdf: $('#translatePdfPanel'),
     };
 
     modeBtns.forEach(btn => {
@@ -2274,5 +2275,673 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         progressSectionP2W.style.display = 'none';
         resultsSectionP2W.style.display = 'none';
         setP2WProgress(0, '');
+    }
+
+    // ============================================================
+    // ==================== MOTOR DE TRADUCCIÓN ====================
+    // ============================================================
+    // Extrae el texto del PDF con PDF.js y lo traduce mediante APIs
+    // gratuitas de traducción con failover automático:
+    //   1) Google Translate (endpoint público gtx)
+    //   2) MyMemory API (respaldo)
+    // Incluye caché de segmentos, deduplicación, reintentos con
+    // backoff y detección de idioma (online + heurística offline).
+
+    const TR_LANG_NAMES = {
+        'es': 'Español', 'en': 'Inglés', 'fr': 'Francés', 'de': 'Alemán',
+        'it': 'Italiano', 'pt': 'Portugués', 'ca': 'Catalán', 'gl': 'Gallego',
+        'eu': 'Euskera', 'nl': 'Neerlandés', 'ru': 'Ruso', 'uk': 'Ucraniano',
+        'pl': 'Polaco', 'ro': 'Rumano', 'tr': 'Turco', 'sv': 'Sueco',
+        'zh-CN': 'Chino', 'ja': 'Japonés', 'ko': 'Coreano', 'ar': 'Árabe',
+        'hi': 'Hindi'
+    };
+    const TR_CJK_RE = /[\u2E80-\u9FFF\uF900-\uFAFF\uFF66-\uFF9F]/;
+    const trCache = new Map();        // "sl|tl|segmento" → traducción
+    let trProvider = 'google';        // proveedor preferente (sticky)
+    let trFailedSegments = 0;         // segmentos que conservaron el original
+
+    function trSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // Divide un texto largo en trozos <= maxLen respetando párrafos,
+    // frases y palabras (sin lookbehind, compatible con Safari antiguo)
+    function trChunkText(text, maxLen) {
+        if (text.length <= maxLen) return [text];
+        const chunks = [];
+        let buf = '';
+        const flush = () => { if (buf.trim()) chunks.push(buf.trim()); buf = ''; };
+        const lines = text.match(/[^\n]+(?:\n|$)|\n+/g) || [text];
+        for (let line of lines) {
+            while (buf && (buf + line).length > maxLen) flush();
+            if (line.length > maxLen) {
+                const sentences = line.match(/[^.!?…。！？]+[.!?…。！？]*\s*/g) || [line];
+                for (let s of sentences) {
+                    while (buf && (buf + s).length > maxLen) flush();
+                    if (s.length > maxLen) {
+                        const words = s.split(/(\s+)/);
+                        for (let w of words) {
+                            while (buf && (buf + w).length > maxLen) flush();
+                            if (w.length > maxLen) {
+                                for (let i = 0; i < w.length; i += maxLen) chunks.push(w.slice(i, i + maxLen));
+                            } else buf += w;
+                        }
+                    } else buf += s;
+                }
+            } else buf += line;
+        }
+        flush();
+        return chunks.length ? chunks : [text.slice(0, maxLen)];
+    }
+
+    // Proveedor 1: Google Translate (endpoint público, con autodetección)
+    async function trGoogle(text, sl, tl) {
+        const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t'
+            + '&sl=' + encodeURIComponent(sl) + '&tl=' + encodeURIComponent(tl)
+            + '&q=' + encodeURIComponent(text);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('google-http-' + res.status);
+        const data = await res.json();
+        if (!data || !Array.isArray(data[0])) throw new Error('google-formato');
+        let out = '';
+        data[0].forEach(seg => { if (seg && typeof seg[0] === 'string') out += seg[0]; });
+        if (!out.trim()) throw new Error('google-vacio');
+        return { text: out, detected: (typeof data[2] === 'string' && data[2]) ? data[2] : null };
+    }
+
+    // Proveedor 2: MyMemory (respaldo gratuito, límite ~500 caracteres)
+    async function trMyMemory(text, sl, tl) {
+        const src = (sl && sl !== 'auto') ? sl : 'en';
+        const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text)
+            + '&langpair=' + encodeURIComponent(src + '|' + tl);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('mymemory-http-' + res.status);
+        const data = await res.json();
+        const t = data && data.responseData && data.responseData.translatedText;
+        if (!t || /QUERY LENGTH LIMIT|INVALID|QUOTA/i.test(t)) throw new Error('mymemory-rechazo');
+        return { text: t, detected: null };
+    }
+
+    // Detecta el idioma de una muestra: online, con heurística offline de respaldo
+    async function trDetect(sample) {
+        const short = sample.slice(0, 400);
+        try {
+            const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t'
+                + '&sl=auto&tl=en&q=' + encodeURIComponent(short);
+            const res = await fetch(url);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && typeof data[2] === 'string' && data[2]) return data[2];
+            }
+        } catch (e) { /* usar heurística */ }
+        return trDetectHeuristic(sample);
+    }
+
+    function trDetectHeuristic(text) {
+        const t = text.slice(0, 1500);
+        if (/[\u3040-\u30FF]/.test(t)) return 'ja';
+        if (/[\uAC00-\uD7AF]/.test(t)) return 'ko';
+        if (/[\u4E00-\u9FFF]/.test(t)) return 'zh-CN';
+        if (/[\u0600-\u06FF]/.test(t)) return 'ar';
+        if (/[\u0900-\u097F]/.test(t)) return 'hi';
+        if (/[\u0400-\u04FF]/.test(t)) return /[їієґ]/i.test(t) ? 'uk' : 'ru';
+        if (/[\u0370-\u03FF]/.test(t)) return 'el';
+        const lower = ' ' + t.toLowerCase().replace(/[^\p{L}\s]/gu, ' ').replace(/\s+/g, ' ') + ' ';
+        const score = (words) => words.reduce((acc, w) => acc + (lower.includes(' ' + w + ' ') ? 1 : 0), 0);
+        const counts = [
+            ['es', score(['el', 'la', 'los', 'las', 'de', 'que', 'y', 'en', 'un', 'una', 'por', 'con', 'para', 'es', 'del', 'se', 'no', 'su', 'al'])],
+            ['en', score(['the', 'of', 'and', 'to', 'in', 'is', 'that', 'for', 'it', 'with', 'as', 'was', 'on', 'are', 'this', 'be', 'have', 'from'])],
+            ['fr', score(['le', 'la', 'les', 'des', 'et', 'est', 'un', 'une', 'du', 'que', 'pour', 'dans', 'sur', 'pas', 'au', 'ce', 'il'])],
+            ['pt', score(['os', 'as', 'de', 'que', 'um', 'uma', 'do', 'da', 'em', 'para', 'com', 'não', 'por', 'mais', 'como'])],
+            ['it', score(['il', 'di', 'che', 'un', 'una', 'del', 'della', 'per', 'con', 'non', 'sono', 'come', 'anche'])],
+            ['de', score(['der', 'die', 'das', 'und', 'ist', 'von', 'zu', 'den', 'mit', 'nicht', 'ein', 'eine', 'auf', 'für', 'im', 'sich'])],
+            ['ca', score(['els', 'les', 'dels', 'és', 'amb', 'per', 'com', 'més', 'que', 'un', 'una'])],
+            ['gl', score(['os', 'as', 'do', 'da', 'unha', 'que', 'para', 'con', 'non', 'como', 'mais'])],
+            ['nl', score(['het', 'een', 'en', 'van', 'is', 'dat', 'niet', 'met', 'voor', 'op', 'zijn', 'aan', 'ook'])],
+            ['tr', score(['bir', 've', 'bu', 'için', 'ile', 'olarak', 'daha', 'çok', 'var', 'ama', 'gibi', 'olan'])]
+        ];
+        counts.sort((a, b) => b[1] - a[1]);
+        return counts[0][1] > 0 ? counts[0][0] : 'en';
+    }
+
+    // Traduce un segmento (párrafo) usando el proveedor preferente y,
+    // si falla, el alternativo; reintenta 2 veces por proveedor.
+    async function trTranslateSegment(text, sl, tl) {
+        const key = sl + '|' + tl + '|' + text;
+        if (trCache.has(key)) return trCache.get(key);
+
+        const order = trProvider === 'google' ? ['google', 'mymemory'] : ['mymemory', 'google'];
+        const limits = { google: 1200, mymemory: 460 };
+        let lastErr = null;
+
+        for (const prov of order) {
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    const parts = trChunkText(text, limits[prov]);
+                    const outParts = [];
+                    for (const part of parts) {
+                        const fn = prov === 'google' ? trGoogle : trMyMemory;
+                        const out = await fn(part, sl, tl);
+                        if (!out || !out.text) throw new Error('respuesta-vacía');
+                        outParts.push(out.text);
+                        await trSleep(120);
+                    }
+                    trProvider = prov;
+                    const joined = outParts.join(' ');
+                    trCache.set(key, joined);
+                    return joined;
+                } catch (err) {
+                    lastErr = err;
+                    await trSleep(600 * (attempt + 1));
+                }
+            }
+        }
+        throw lastErr || new Error('No se pudo traducir el segmento');
+    }
+
+    // Extrae el texto de un PDF organizado en páginas y párrafos.
+    // Reutiliza groupTextItemsIntoLines (mismo motor que PDF → Word).
+    function trLineText(line) {
+        let out = '';
+        let prev = null;
+        line.items.forEach(it => {
+            let s = it.str;
+            if (prev) {
+                const gap = it.x - (prev.x + prev.width);
+                if (gap > prev.height * 0.15 && !/^\s/.test(s) && !/\s$/.test(prev.str)) out += ' ';
+            }
+            out += s;
+            prev = it;
+        });
+        return out.replace(/\s+/g, ' ').trim();
+    }
+
+    async function trExtractPdf(file, onProgress) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pages = [];
+        let totalChars = 0;
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            const lines = groupTextItemsIntoLines(textContent.items);
+
+            const paragraphs = [];
+            let buf = '';
+            let prevY = null;
+
+            lines.forEach(line => {
+                const text = trLineText(line);
+                if (prevY !== null && (prevY - line.y) > line.avgHeight * 1.9) {
+                    if (buf.trim()) paragraphs.push(buf.trim());
+                    buf = '';
+                }
+                if (text) {
+                    // reconstruir palabras cortadas por guion al final de línea
+                    if (buf.endsWith('-') && /^[a-záéíóúñüàèìòùâêîôûäëïöçãõ]./.test(text)) {
+                        buf = buf.replace(/-$/, '') + text;
+                    } else {
+                        buf = buf ? buf + ' ' + text : text;
+                    }
+                } else if (buf.trim()) {
+                    paragraphs.push(buf.trim());
+                    buf = '';
+                }
+                prevY = line.y;
+            });
+            if (buf.trim()) paragraphs.push(buf.trim());
+
+            paragraphs.forEach(p => { totalChars += p.length; });
+            pages.push({ paragraphs });
+            if (onProgress) onProgress(pageNum / pdf.numPages);
+        }
+
+        return { pages, hasText: totalChars >= 20 };
+    }
+
+    // Deduplica segmentos idénticos (encabezados/pies repetidos) y los
+    // traduce una sola vez, repartiendo el progreso de forma lineal.
+    async function trTranslatePages(pages, sl, tl, onProgress) {
+        const uniqueMap = new Map();
+        const uniqList = [];
+        const targets = [];
+
+        pages.forEach((pg, pi) => {
+            pg.paragraphs.forEach((p, qi) => {
+                if (!p.trim()) return;
+                if (!uniqueMap.has(p)) { uniqueMap.set(p, uniqList.length); uniqList.push(p); }
+                targets.push([pi, qi, uniqueMap.get(p)]);
+            });
+        });
+
+        const translated = new Array(uniqList.length).fill(null);
+        for (let i = 0; i < uniqList.length; i++) {
+            try {
+                translated[i] = await trTranslateSegment(uniqList[i], sl, tl);
+            } catch (err) {
+                translated[i] = uniqList[i];
+                trFailedSegments++;
+            }
+            if (onProgress) onProgress((i + 1) / uniqList.length);
+        }
+
+        const outPages = pages.map(pg => ({ paragraphs: pg.paragraphs.map(() => '') }));
+        targets.forEach(([pi, qi, ui]) => { outPages[pi].paragraphs[qi] = translated[ui]; });
+        return outPages;
+    }
+
+    // ---------- Generador TXT ----------
+    function trBuildTxt(origPages, transPages, bilingual) {
+        let out = '';
+        origPages.forEach((pg, i) => {
+            out += '— Página ' + (i + 1) + ' —\n\n';
+            pg.paragraphs.forEach((p, qi) => {
+                const t = transPages[i].paragraphs[qi] || '';
+                if (!p && !t) return;
+                if (bilingual && p) out += p + '\n';
+                if (t) out += t + '\n';
+                out += '\n';
+            });
+        });
+        return new Blob([out], { type: 'text/plain;charset=utf-8' });
+    }
+
+    // ---------- Generador Word (.docx) ----------
+    async function trBuildDocx(origPages, transPages, bilingual) {
+        const { Document, Packer, Paragraph, TextRun, PageBreak } = window.docx;
+        const children = [];
+
+        origPages.forEach((pg, i) => {
+            pg.paragraphs.forEach((p, qi) => {
+                const t = transPages[i].paragraphs[qi] || '';
+                if (!p && !t) { children.push(new Paragraph({ text: '' })); return; }
+                if (bilingual && p) {
+                    children.push(new Paragraph({
+                        children: [new TextRun({ text: p, color: '888888', italics: true, size: 20 })]
+                    }));
+                }
+                children.push(new Paragraph({
+                    children: [new TextRun({ text: t || p, size: 24 })]
+                }));
+                children.push(new Paragraph({ text: '' }));
+            });
+            if (i < origPages.length - 1) children.push(new Paragraph({ children: [new PageBreak()] }));
+        });
+
+        if (!children.length) children.push(new Paragraph({ text: '' }));
+        const doc = new Document({ sections: [{ properties: {}, children }] });
+        return await Packer.toBlob(doc);
+    }
+
+    // ---------- Generador PDF (vía canvas: soporta todos los alfabetos) ----------
+    const TR_RTL_RE = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\uFB1D-\uFDFF\uFE70-\uFEFC]/;
+    const TR_FONT_STACK = '"Segoe UI", "Noto Sans", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif';
+
+    async function trBuildPdf(origPages, transPages, bilingual, onProgress) {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+
+        const W = 595.28, H = 841.89, S = 2;
+        const cWidth = Math.round(W * S), cHeight = Math.round(H * S);
+        const ML = 56 * S, MR = 56 * S, MT = 60 * S, MB = 66 * S;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = cWidth; canvas.height = cHeight;
+        const ctx = canvas.getContext('2d');
+
+        let y = MT;
+        let pageNo = 0;
+
+        function startPage() {
+            if (pageNo > 0) {
+                drawFooter();
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, W, H);
+                pdf.addPage();
+            }
+            pageNo++;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, cWidth, cHeight);
+            ctx.textBaseline = 'top';
+            y = MT;
+        }
+
+        function drawFooter() {
+            ctx.save();
+            ctx.fillStyle = '#999999';
+            ctx.font = '18px ' + TR_FONT_STACK;
+            ctx.direction = 'ltr';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(pageNo), cWidth / 2, cHeight - 40 * S);
+            ctx.restore();
+        }
+
+        function drawParagraph(text, fontPx, italic, color, isCjk) {
+            const font = (italic ? 'italic ' : '') + fontPx + 'px ' + TR_FONT_STACK;
+            const lh = Math.ceil(fontPx * 1.5);
+            const maxW = cWidth - ML - MR;
+            const rtl = TR_RTL_RE.test(text);
+
+            ctx.font = font;
+            ctx.fillStyle = color;
+            ctx.direction = rtl ? 'rtl' : 'ltr';
+            ctx.textAlign = rtl ? 'right' : 'left';
+
+            const lines = wrapForCanvas(text, maxW, isCjk);
+            const x = rtl ? cWidth - MR : ML;
+            lines.forEach(ln => {
+                if (y + lh > cHeight - MB) {
+                    startPage();
+                    ctx.font = font;
+                    ctx.fillStyle = color;
+                    ctx.direction = rtl ? 'rtl' : 'ltr';
+                    ctx.textAlign = rtl ? 'right' : 'left';
+                }
+                ctx.fillText(ln, x, y);
+                y += lh;
+            });
+            y += 10;
+        }
+
+        function wrapForCanvas(text, maxW, isCjk) {
+            const lines = [];
+            if (isCjk) {
+                let line = '';
+                for (const ch of text) {
+                    if (line && ctx.measureText(line + ch).width > maxW) { lines.push(line); line = ch; }
+                    else line += ch;
+                }
+                if (line) lines.push(line);
+                return lines;
+            }
+            const words = text.split(/\s+/).filter(Boolean);
+            let line = '';
+            for (let w of words) {
+                while (ctx.measureText(w).width > maxW && w.length > 1) {
+                    let cut = w.length - 1;
+                    while (cut > 1 && ctx.measureText(w.slice(0, cut) + '-').width > maxW) cut--;
+                    const head = w.slice(0, cut) + '-';
+                    if (line) { lines.push(line); line = ''; }
+                    lines.push(head);
+                    w = w.slice(cut);
+                }
+                const test = line ? line + ' ' + w : w;
+                if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+                else line = test;
+            }
+            if (line) lines.push(line);
+            return lines;
+        }
+
+        origPages.forEach((pg, i) => {
+            if (onProgress) onProgress((i + 1) / origPages.length);
+            startPage();
+            pg.paragraphs.forEach((p, qi) => {
+                const t = transPages[i].paragraphs[qi] || '';
+                if (!p && !t) { y += 8; return; }
+                if (bilingual && p) drawParagraph(p, 20, true, '#666666', TR_CJK_RE.test(p));
+                drawParagraph(t || p, 24, false, '#111111', TR_CJK_RE.test(t || p));
+            });
+        });
+        drawFooter();
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, W, H);
+
+        return pdf.output('blob');
+    }
+
+    function globeIconSvg() {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>`;
+    }
+
+    // ============================================================
+    // ==================== MODO TRADUCIR PDF ======================
+    // ============================================================
+    const dropZoneTr = $('#dropZoneTr');
+    const fileInputTr = $('#fileInputTr');
+    const uploadSectionTr = $('#uploadSectionTr');
+    const optionsSectionTr = $('#optionsSectionTr');
+    const progressSectionTr = $('#progressSectionTr');
+    const resultsSectionTr = $('#resultsSectionTr');
+    const fileNameTr = $('#fileNameTr');
+    const removeFileTr = $('#removeFileTr');
+    const trQueueEl = $('#trQueue');
+    const sourceLangSelect = $('#sourceLangSelect');
+    const targetLangSelect = $('#targetLangSelect');
+    const swapLangBtn = $('#swapLangBtn');
+    const trFormatSelector = $('#trFormatSelector');
+    const bilingualCheckTr = $('#bilingualCheckTr');
+    const convertBtnTr = $('#convertBtnTr');
+    const progressTitleTr = $('#progressTitleTr');
+    const progressPercentTr = $('#progressPercentTr');
+    const progressFillTr = $('#progressFillTr');
+    const resultsMetaTr = $('#resultsMetaTr');
+    const downloadZipBtnTr = $('#downloadZipBtnTr');
+    const filesListTr = $('#filesListTr');
+
+    let trFiles = [];
+    let isConvertingTr = false;
+    let trResults = [];
+
+    dropZoneTr.addEventListener('click', () => fileInputTr.click());
+    fileInputTr.addEventListener('change', (e) => {
+        if (e.target.files.length) handleTrFiles(Array.from(e.target.files));
+    });
+    dropZoneTr.addEventListener('dragover', (e) => { e.preventDefault(); dropZoneTr.classList.add('dragover'); });
+    dropZoneTr.addEventListener('dragleave', () => dropZoneTr.classList.remove('dragover'));
+    dropZoneTr.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZoneTr.classList.remove('dragover');
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+        if (files.length) handleTrFiles(files);
+        else showToast('Solo se permiten archivos PDF', 'error');
+    });
+
+    removeFileTr.addEventListener('click', resetTrMode);
+    convertBtnTr.addEventListener('click', startTrTranslate);
+    downloadZipBtnTr.addEventListener('click', () => downloadResultsZip(trResults, 'documentos-traducidos.zip', downloadZipBtnTr));
+
+    swapLangBtn.addEventListener('click', () => {
+        const s = sourceLangSelect.value;
+        const t = targetLangSelect.value;
+        if (s === 'auto') {
+            sourceLangSelect.value = t;
+            targetLangSelect.value = (t !== 'es') ? 'es' : 'en';
+        } else {
+            sourceLangSelect.value = t;
+            targetLangSelect.value = s;
+        }
+    });
+
+    trFormatSelector.querySelectorAll('.segment').forEach(btn => {
+        btn.addEventListener('click', () => {
+            trFormatSelector.querySelectorAll('.segment').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
+    const addMoreFileTr = $('#addMoreFileTr');
+    const addMoreInputTr = $('#addMoreInputTr');
+    if (addMoreFileTr && addMoreInputTr) {
+        addMoreFileTr.addEventListener('click', () => {
+            addMoreInputTr.value = '';
+            addMoreInputTr.click();
+        });
+        addMoreInputTr.addEventListener('change', (e) => {
+            if (e.target.files.length) handleTrFiles(Array.from(e.target.files));
+        });
+    }
+
+    const trSortSelect = $('#trSortSelect');
+    if (trSortSelect) {
+        trSortSelect.addEventListener('change', () => {
+            if (trFiles.length) {
+                trFiles = sortFiles(trFiles, trSortSelect.value);
+                redrawTrQueue();
+            }
+        });
+    }
+
+    function handleTrFiles(files) {
+        const valid = files.filter(f => f.type === 'application/pdf');
+        if (!valid.length) {
+            showToast('Solo se permiten archivos PDF', 'error');
+            return;
+        }
+        valid.forEach(file => {
+            const id = 'tr-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            trFiles.push({ file, id });
+        });
+        const sortValue = $('#trSortSelect') ? $('#trSortSelect').value : 'name-asc';
+        trFiles = sortFiles(trFiles, sortValue);
+        redrawTrQueue();
+        updateTrUI();
+    }
+
+    function redrawTrQueue() {
+        renderSimpleQueue(trQueueEl, trFiles, 'var(--success)', (id) => {
+            trFiles = trFiles.filter(i => i.id !== id);
+            redrawTrQueue();
+            updateTrUI();
+        });
+    }
+
+    function updateTrUI() {
+        const count = trFiles.length;
+        if (count > 0) {
+            fileNameTr.textContent = `${count} archivo${count !== 1 ? 's' : ''} seleccionado${count !== 1 ? 's' : ''}`;
+            uploadSectionTr.style.display = 'none';
+            optionsSectionTr.style.display = 'block';
+            resultsSectionTr.style.display = 'none';
+            progressSectionTr.style.display = 'none';
+        } else {
+            resetTrMode();
+        }
+    }
+
+    function setTrProgress(percent, title) {
+        progressFillTr.style.width = percent + '%';
+        progressPercentTr.textContent = Math.max(0, Math.min(100, Math.round(percent))) + '%';
+        if (title) progressTitleTr.textContent = title;
+    }
+
+    async function startTrTranslate() {
+        if (!trFiles.length || isConvertingTr) return;
+
+        isConvertingTr = true;
+        optionsSectionTr.style.display = 'none';
+        progressSectionTr.style.display = 'block';
+        resultsSectionTr.style.display = 'none';
+        setTrProgress(0, 'Preparando...');
+
+        const btnLabel = convertBtnTr.querySelector('.btn-label');
+        const btnSpinner = convertBtnTr.querySelector('.btn-spinner');
+        btnLabel.style.display = 'none';
+        btnSpinner.style.display = 'inline-flex';
+        convertBtnTr.disabled = true;
+
+        trResults = [];
+        trFailedSegments = 0;
+        const total = trFiles.length;
+        const fmt = trFormatSelector.querySelector('.segment.active').dataset.value;
+        const bilingual = bilingualCheckTr.checked;
+        const slSetting = sourceLangSelect.value;
+        const tl = targetLangSelect.value;
+        const failures = [];
+
+        try {
+            for (let i = 0; i < total; i++) {
+                const item = trFiles[i];
+                const base = (frac, msg) => setTrProgress(((i + frac) / total) * 100, msg);
+
+                try {
+                    // 1) Extraer texto del PDF
+                    base(0.02, `Extrayendo texto — ${item.file.name}`);
+                    const doc = await trExtractPdf(item.file, (f) =>
+                        base(0.02 + f * 0.18, `Extrayendo texto (${Math.round(f * 100)}%) — ${item.file.name}`));
+
+                    if (!doc.hasText) {
+                        throw new Error(`"${item.file.name}" no contiene texto seleccionable (parece un escaneo). El traductor necesita PDFs con texto real.`);
+                    }
+
+                    // 2) Detectar idioma de origen si está en automático
+                    let sl = slSetting;
+                    if (sl === 'auto') {
+                        base(0.22, `Detectando idioma — ${item.file.name}`);
+                        const sample = doc.pages.map(p => p.paragraphs.join(' ')).join(' ').slice(0, 500);
+                        sl = await trDetect(sample);
+                    }
+                    const srcName = TR_LANG_NAMES[sl] || sl;
+                    const dstName = TR_LANG_NAMES[tl] || tl;
+
+                    // 3) Traducir
+                    const transPages = await trTranslatePages(doc.pages, sl, tl, (f) =>
+                        base(0.25 + f * 0.63, `Traduciendo ${srcName} → ${dstName} (${Math.round(f * 100)}%) — ${item.file.name}`));
+
+                    // 4) Generar documento de salida
+                    base(0.9, `Generando documento — ${item.file.name}`);
+                    let blob, ext;
+                    if (fmt === 'docx') {
+                        blob = await trBuildDocx(doc.pages, transPages, bilingual);
+                        ext = 'docx';
+                    } else if (fmt === 'pdf') {
+                        blob = await trBuildPdf(doc.pages, transPages, bilingual);
+                        ext = 'pdf';
+                    } else {
+                        blob = trBuildTxt(doc.pages, transPages, bilingual);
+                        ext = 'txt';
+                    }
+
+                    const outName = item.file.name.replace(/\.pdf$/i, '')
+                        + `_trad_${tl}${bilingual ? '_bilingue' : ''}.${ext}`;
+                    trResults.push({ blob, name: outName });
+                } catch (err) {
+                    console.error('Traducción fallida:', err);
+                    failures.push(item.file.name + ': ' + err.message);
+                }
+            }
+
+            setTrProgress(100, 'Completado');
+            progressSectionTr.style.display = 'none';
+
+            if (trResults.length) {
+                resultsSectionTr.style.display = 'block';
+                resultsMetaTr.textContent = `${trResults.length} archivo${trResults.length !== 1 ? 's' : ''} listo${trResults.length !== 1 ? 's' : ''}`;
+                renderResultsList(filesListTr, trResults, '#10b981', globeIconSvg());
+                if (trFailedSegments > 0) {
+                    showToast(`${trFailedSegments} sección(es) no se pudieron traducir y se conservaron en el idioma original`, 'error');
+                } else {
+                    showToast('Traducción completada', 'success');
+                }
+            } else {
+                optionsSectionTr.style.display = 'block';
+            }
+            if (failures.length) {
+                showToast(failures[0] + (failures.length > 1 ? ` (y ${failures.length - 1} error${failures.length > 2 ? 'es' : ''} más)` : ''), 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('Error inesperado: ' + err.message, 'error');
+            optionsSectionTr.style.display = 'block';
+            progressSectionTr.style.display = 'none';
+        } finally {
+            isConvertingTr = false;
+            btnLabel.style.display = 'inline';
+            btnSpinner.style.display = 'none';
+            convertBtnTr.disabled = false;
+        }
+    }
+
+    function resetTrMode() {
+        trFiles = [];
+        trResults = [];
+        isConvertingTr = false;
+        fileInputTr.value = '';
+        uploadSectionTr.style.display = 'block';
+        optionsSectionTr.style.display = 'none';
+        progressSectionTr.style.display = 'none';
+        resultsSectionTr.style.display = 'none';
+        setTrProgress(0, '');
     }
 })();
