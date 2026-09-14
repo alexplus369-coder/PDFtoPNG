@@ -2668,6 +2668,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const pages = [];
         let totalChars = 0;
+        const pageChars = [];   // caracteres por página (detecta páginas escaneadas)
 
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
             const page = await pdf.getPage(pageNum);
@@ -2735,12 +2736,329 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
             });
             pushPara();
 
-            paragraphs.forEach(p => { totalChars += p.length; });
+            let chars = 0;
+            paragraphs.forEach(p => { totalChars += p.length; chars += (p.match(/\S/g) || []).length; });
+            pageChars.push(chars);
             pages.push({ paragraphs: paragraphs, geo: geoList });
             if (onProgress) onProgress(pageNum / pdf.numPages);
         }
 
-        return { pages, hasText: totalChars >= 20 };
+        return { pages: pages, hasText: totalChars >= 20, pageChars: pageChars };
+    }
+
+    // ===== OCR integrado (Tesseract.js) para páginas escaneadas =====
+    // Si una página no tiene capa de texto (o el usuario fuerza OCR),
+    // se renderiza a imagen y Tesseract lee el texto CON su posición.
+    // El resultado se convierte al MISMO formato párrafos+geometría que
+    // la extracción digital: todo el pipeline (lotes, caché, corte
+    // parcial, PDF diseño, bilingüe…) funciona sin cambios.
+
+    const TR_OCR_MIN_CHARS = 40;   // menos caracteres por página ⇒ escaneada
+    const TR_OCR_SECS_PAGE = 7;    // estimación s/página (para la ETA)
+    const TR_OCR_MAX_LINES_PARA = 10; // parte párrafos gigantes (columnas)
+    let trOcrLibPromise = null;    // descarga única de Tesseract.js
+    const trOcrWorkers = new Map(); // idioma → worker reutilizable
+    let trOcrStatusCb = null;      // callback de progreso del motor
+
+    function trOcrMode() {
+        const el = document.getElementById('trOcrMode');
+        return el ? el.value : 'auto';
+    }
+    function trOcrLang() {
+        const el = document.getElementById('trOcrLang');
+        return el ? el.value : 'eng+spa';
+    }
+
+    function trLoadOcrLib() {
+        if (window.Tesseract) return Promise.resolve();
+        if (trOcrLibPromise) return trOcrLibPromise;
+        trOcrLibPromise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+            s.onload = () => resolve();
+            s.onerror = () => {
+                trOcrLibPromise = null;
+                reject(new Error('no se pudo descargar el motor OCR (Tesseract.js) — revisa tu conexión'));
+            };
+            document.head.appendChild(s);
+        });
+        return trOcrLibPromise;
+    }
+
+    async function trOcrWorker(lang) {
+        if (trOcrWorkers.has(lang)) return trOcrWorkers.get(lang);
+        await trLoadOcrLib();
+        const opts = {
+            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+            corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+            langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+            logger: (m) => { if (trOcrStatusCb) trOcrStatusCb(m); }
+        };
+        let worker;
+        try {
+            worker = await Tesseract.createWorker(lang, 1, opts);          // API v5
+        } catch (e1) {
+            try { worker = await Tesseract.createWorker(Object.assign({ lang: lang, oem: 1 }, opts)); } // API v4
+            catch (e2) {
+                throw new Error('no se pudo iniciar el OCR: ' + ((e2 && e2.message) || (e1 && e1.message) || 'error desconocido'));
+            }
+        }
+        try { await worker.setParameters({ preserve_interword_spaces: '1' }); } catch (e) { /* opcional */ }
+        trOcrWorkers.set(lang, worker);
+        return worker;
+    }
+
+    function trOcrTerminate() {
+        trOcrWorkers.forEach(w => { try { w.terminate(); } catch (e) {} });
+        trOcrWorkers.clear();
+    }
+
+    // Reconstruye párrafos desde la salida de Tesseract. Importante: el
+    // LSTM de Tesseract a veces FUSIONA columnas en una misma línea, así
+    // que no se confía en sus párrafos: se reconstruye todo desde las
+    // PALABRAS (bbox individual, siempre disponibles):
+    //   1) canaletas verticales por proyección X → columnas (estilo XY-cut)
+    //   2) palabras anchas (títulos/banner) → grupo propio
+    //   3) por columna: palabras → líneas (banda Y) → párrafos (proximidad)
+    // Devuelve [[{text, bbox}, …], …] — grupos de líneas en píxeles canvas.
+    function trOcrParagraphsFromData(data) {
+        // 1) aplana palabras (v5: blocks→paragraphs→lines→words; legacy: data.words)
+        const raw = [];
+        const takeWord = (w) => {
+            if (!w || !w.bbox) return;
+            const t = String(w.text || '').replace(/\s+/g, '').trim();
+            if (!t) return;
+            if (w.confidence != null && w.confidence < 35) return;
+            if (/^[\W_]$/.test(t)) return;   // un símbolo suelto (·, |, .)
+            raw.push({ text: t, bbox: w.bbox });
+        };
+        if (Array.isArray(data.blocks) && data.blocks.length) {
+            data.blocks.forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l => (l.words || []).forEach(takeWord))));
+        }
+        if (!raw.length && Array.isArray(data.words)) data.words.forEach(takeWord);
+        if (!raw.length && Array.isArray(data.lines)) {
+            // último recurso (v4 sin words): usa las líneas como unidades
+            data.lines.forEach(l => {
+                if (!l || !l.bbox) return;
+                const t = String(l.text || '').replace(/\s+/g, ' ').trim();
+                if (!t || t.length < 2) return;
+                if (l.confidence != null && l.confidence < 35) return;
+                if (/^[\W_]+$/.test(t) && !/\d/.test(t)) return;
+                raw.push({ text: t, bbox: l.bbox });
+            });
+        }
+        if (!raw.length) return [];
+
+        const hs = raw.map(w => w.bbox.y1 - w.bbox.y0).sort((a, b) => a - b);
+        const medH = Math.max(hs[Math.floor(hs.length / 2)] || 20, 8);
+        const minX = Math.min.apply(null, raw.map(w => w.bbox.x0));
+        const maxX = Math.max.apply(null, raw.map(w => w.bbox.x1));
+        const contentW = Math.max(maxX - minX, 1);
+
+        // 2) canaletas verticales: proyección X ignorando palabras anchas
+        const wideW = contentW * 0.55;   // ≥ esto = título/banner a todo lo ancho
+        const BIN = 8;
+        const nb = Math.ceil(contentW / BIN) + 1;
+        const cov = new Array(nb).fill(false);
+        raw.forEach(w => {
+            if ((w.bbox.x1 - w.bbox.x0) > wideW) return;
+            const a = Math.max(0, Math.floor((w.bbox.x0 - minX) / BIN));
+            const b = Math.min(nb - 1, Math.floor((w.bbox.x1 - minX) / BIN));
+            for (let i = a; i <= b; i++) cov[i] = true;
+        });
+        const GUT = Math.max(30, contentW * 0.025);
+        const cols = [];
+        let colStart = null, gapRun = 0;
+        for (let i = 0; i < nb; i++) {
+            if (!cov[i]) { gapRun += BIN; continue; }
+            if (colStart !== null && gapRun >= GUT) {
+                cols.push([colStart, minX + (i - 1) * BIN]);
+                colStart = minX + i * BIN;
+            } else if (colStart === null) {
+                colStart = minX + i * BIN;
+            }
+            gapRun = 0;
+        }
+        if (colStart !== null) cols.push([colStart, maxX]);
+
+        // 3) reparte palabras: por columna; las anchas → grupo propio
+        const buckets = [];
+        if (cols.length >= 2) {
+            const colAcc = cols.map(() => []);
+            raw.forEach(w => {
+                const cx = (w.bbox.x0 + w.bbox.x1) / 2;
+                if ((w.bbox.x1 - w.bbox.x0) > wideW) {
+                    buckets.push({ words: [w], y0: w.bbox.y0, x0: w.bbox.x0, full: true });
+                    return;
+                }
+                for (let c = 0; c < cols.length; c++) {
+                    if (cx >= cols[c][0] - BIN && cx <= cols[c][1] + BIN) { colAcc[c].push(w); return; }
+                }
+                colAcc[0].push(w);   // fuera de rango (raro): primera columna
+            });
+            colAcc.forEach((acc, c) => {
+                if (acc.length < raw.length * 0.04) return;   // columna fantasma
+                buckets.push({ words: acc, y0: Math.min.apply(null, acc.map(w => w.bbox.y0)),
+                    x0: Math.min.apply(null, acc.map(w => w.bbox.x0)), full: false });
+            });
+        } else {
+            buckets.push({ words: raw, y0: Math.min.apply(null, raw.map(w => w.bbox.y0)),
+                x0: minX, full: false });
+        }
+        if (buckets.filter(b => !b.full).length < 2 && buckets.length > 1) {
+            // canaleta falsa: todo a un grupo único
+            buckets.length = 0;
+            buckets.push({ words: raw, y0: Math.min.apply(null, raw.map(w => w.bbox.y0)), x0: minX, full: false });
+        }
+        buckets.sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
+
+        // 4) por cubo: palabras → líneas (banda Y) → párrafos (proximidad)
+        const groups = [];
+        buckets.forEach(bk => {
+            const ws = bk.words.slice().sort((a, b) => (a.bbox.y0 - b.bbox.y0) || (a.bbox.x0 - b.bbox.x0));
+            const lines = [];
+            let cur = null;
+            ws.forEach(w => {
+                const cy = (w.bbox.y0 + w.bbox.y1) / 2;
+                if (!cur || Math.abs(cy - cur.cy) > Math.max(medH * 0.6, 6)) {
+                    cur = { cy: cy, ws: [w] };
+                    lines.push(cur);
+                } else {
+                    cur.ws.push(w);
+                    cur.cy = cur.cy + (cy - cur.cy) / cur.ws.length;
+                }
+            });
+            const lineObjs = lines.map(l => {
+                l.ws.sort((a, b) => a.bbox.x0 - b.bbox.x0);
+                const bx0 = Math.min.apply(null, l.ws.map(w => w.bbox.x0));
+                const bx1 = Math.max.apply(null, l.ws.map(w => w.bbox.x1));
+                const by0 = Math.min.apply(null, l.ws.map(w => w.bbox.y0));
+                const by1 = Math.max.apply(null, l.ws.map(w => w.bbox.y1));
+                return { text: l.ws.map(w => w.text).join(' '), bbox: { x0: bx0, y0: by0, x1: bx1, y1: by1 } };
+            });
+            let curPara = null, curBox = null;
+            lineObjs.forEach(l => {
+                const b = l.bbox;
+                let near = false;
+                if (curPara) {
+                    const gap = b.y0 - curBox.y1;
+                    const ov = Math.min(curBox.x1, b.x1) - Math.max(curBox.x0, b.x0);
+                    near = gap <= medH * 0.9 && ov > Math.min(curBox.x1 - curBox.x0, b.x1 - b.x0) * 0.25;
+                }
+                if (near) {
+                    curPara.push(l);
+                    curBox = { x0: Math.min(curBox.x0, b.x0), x1: Math.max(curBox.x1, b.x1),
+                        y0: curBox.y0, y1: Math.max(curBox.y1, b.y1) };
+                } else {
+                    curPara = [l];
+                    curBox = { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1 };
+                    groups.push(curPara);
+                }
+            });
+        });
+        return groups;
+    }
+
+    // Convierte los grupos (píxeles, origen arriba-izquierda) a la página
+    // estándar {paragraphs, geo} en puntos PDF (origen abajo-izquierda).
+    // Los párrafos gigantes se parten para que el auto-ajuste del PDF
+    // diseño no encoja demasiado la fuente.
+    function trOcrBuildPage(groups, vp) {
+        const paragraphs = [];
+        const geoList = [];
+        groups.forEach(lines => {
+            for (let start = 0; start < lines.length; start += TR_OCR_MAX_LINES_PARA) {
+                const chunk = lines.slice(start, start + TR_OCR_MAX_LINES_PARA);
+                const texts = [];
+                chunk.forEach(l => {
+                    const t = l.text;
+                    const last = texts.length ? texts[texts.length - 1] : null;
+                    if (last && /-$/.test(last) && /^[a-záéíóúüñàèìòùâêîôûäëïöçãõ]/.test(t)) {
+                        texts[texts.length - 1] = last.replace(/-$/, '') + t;
+                    } else {
+                        texts.push(t);
+                    }
+                });
+                const text = texts.join(' ').replace(/\s+/g, ' ').trim();
+                if (!text) continue;
+                const ls = chunk.map(l => {
+                    const a = vp.convertToPdfPoint(l.bbox.x0, l.bbox.y0);
+                    const b = vp.convertToPdfPoint(l.bbox.x1, l.bbox.y1);
+                    const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
+                    const yTop = Math.max(a[1], b[1]), yBot = Math.min(a[1], b[1]);
+                    const h = Math.max(yTop - yBot, 1);
+                    return { x: x0, y: yBot + h * 0.22, w: x1 - x0, h: h * 0.85, bold: false, italic: false };
+                }).filter(l => l.w > 0.5 && l.h > 2);
+                if (!ls.length) continue;
+                paragraphs.push(text);
+                geoList.push(buildParaGeo(ls));
+            }
+        });
+        return { paragraphs: paragraphs, geo: geoList, ocrDone: true };
+    }
+
+    // Páginas que necesitan OCR según el modo elegido. Las ya marcadas
+    // con ocrDone (reintento tras corte) se omiten.
+    function trOcrNeededPages(doc, mode) {
+        const need = [];
+        (doc.pages || []).forEach((pg, i) => {
+            if (pg.ocrDone) return;
+            const chars = (doc.pageChars && doc.pageChars[i] != null) ? doc.pageChars[i] : 999;
+            if (mode === 'siempre') need.push(i);
+            else if (mode === 'auto' && chars < TR_OCR_MIN_CHARS) need.push(i);
+        });
+        return need;
+    }
+
+    // Renderiza una página a canvas a ~1700 px de ancho (Óptimo OCR).
+    async function trOcrRenderPage(pdf, pageNum) {
+        const page = await pdf.getPage(pageNum);
+        const vp1 = page.getViewport({ scale: 1 });
+        const scale = Math.min(3, Math.max(1.8, 1700 / vp1.width));
+        const vp = page.getViewport({ scale: scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(vp.width));
+        canvas.height = Math.max(1, Math.floor(vp.height));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        return { canvas: canvas, vp: vp };
+    }
+
+    // Ejecuta OCR sobre las páginas indicadas. Devuelve Map pageIndex →
+    // página {paragraphs, geo}. Respeta la cancelación: las páginas ya
+    // leídas se conservan para el corte parcial.
+    async function trOcrPages(file, pageIdxs, lang, onProgress) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const worker = await trOcrWorker(lang);
+        const out = new Map();
+        for (let k = 0; k < pageIdxs.length; k++) {
+            if (trCancelRequested) break;
+            const pi = pageIdxs[k];
+            const rendered = await trOcrRenderPage(pdf, pi + 1);
+            trOcrStatusCb = (m) => {
+                if (!onProgress) return;
+                const st = (m && m.status) || '';
+                const fase = st.indexOf('recognizing') === 0 ? 'leyendo texto'
+                    : st.indexOf('traineddata') !== -1 ? 'descargando idioma'
+                    : (st.indexOf('core') !== -1 || st.indexOf('initializing') !== -1) ? 'preparando motor'
+                    : 'procesando';
+                onProgress(k, pageIdxs.length, (m && m.progress) || 0, fase);
+            };
+            let res;
+            try {
+                res = await worker.recognize(rendered.canvas);
+            } catch (e) {
+                rendered.canvas.width = 0; rendered.canvas.height = 0;
+                trOcrStatusCb = null;
+                throw new Error('el OCR falló en la página ' + (pi + 1) + ': ' + ((e && e.message) || e));
+            }
+            rendered.canvas.width = 0; rendered.canvas.height = 0;
+            out.set(pi, trOcrBuildPage(trOcrParagraphsFromData(res.data), rendered.vp));
+            if (onProgress) onProgress(k + 1, pageIdxs.length, 1, 'página lista');
+        }
+        trOcrStatusCb = null;
+        return out;
     }
 
     // ===== Control de parada =====
@@ -3430,15 +3748,25 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
 
     function trItemMeta(item) {
         if (item.analyzing) return { text: 'Analizando contenido…', warn: false };
-        if (item.error === 'escaneado') return { text: 'Sin texto seleccionable (escaneo) — no traducible', warn: true };
+        if (item.error === 'escaneado') {
+            const n = item.doc && item.doc.pages ? item.doc.pages.length : 0;
+            if (trOcrMode() === 'nunca') {
+                return { text: 'Sin texto seleccionable (escaneo) — activa el OCR para traducirlo', warn: true };
+            }
+            return { text: 'Escaneo sin texto — se leerá con OCR (' + n + (n === 1 ? ' página' : ' páginas')
+                + ', ≈ ' + trFmtMin(n * TR_OCR_SECS_PAGE) + ' extra la 1.ª vez)', warn: true };
+        }
         if (item.error === 'lectura') return { text: 'No se pudo leer el PDF', warn: true };
         if (item.doc) {
-            const est = (item.uniq || 0) / 4.5 + item.doc.pages.length * 0.3;
+            const scanPages = (item.doc.pageChars || []).filter(c => c < TR_OCR_MIN_CHARS).length;
+            const est = (item.uniq || 0) / 4.5 + item.doc.pages.length * 0.3
+                + ((scanPages && trOcrMode() !== 'nunca') ? scanPages * 1.4 : 0);
             const w = item.words || 0;
             return {
                 text: item.doc.pages.length + (item.doc.pages.length === 1 ? ' página · ' : ' páginas · ')
                     + w.toLocaleString('es') + (w === 1 ? ' palabra · ' : ' palabras · ')
-                    + '≈ ' + trFmtMin(est * 0.7) + ' – ' + trFmtMin(est * 1.9),
+                    + '≈ ' + trFmtMin(est * 0.7) + ' – ' + trFmtMin(est * 1.9)
+                    + ((scanPages && trOcrMode() !== 'nunca') ? ' · OCR en ' + scanPages : ''),
                 warn: false
             };
         }
@@ -3461,7 +3789,9 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         if (words) parts.push(words.toLocaleString('es') + (words === 1 ? ' palabra' : ' palabras'));
         if (uniq) parts.push('tiempo estimado: ' + trFmtMin(est * 0.7) + ' – ' + trFmtMin(est * 1.9));
         if (analyzing) parts.push('analizando…');
-        if (scanned) parts.push(scanned + ' sin texto (no traducible)');
+        if (scanned) parts.push(trOcrMode() === 'nunca'
+            ? scanned + ' sin texto (no traducible)'
+            : scanned + ' escaneado(s) → se traducirán con OCR');
         trStatsBar.textContent = parts.join(' · ');
         trStatsBar.style.display = 'block';
     }
@@ -3555,8 +3885,30 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                         item.doc = doc;
                     }
 
-                    if (!doc.hasText) {
-                        throw new Error('"' + item.file.name + '" no contiene texto seleccionable (parece un escaneo). El traductor necesita PDFs con texto real.');
+                    // 1b) OCR: lee el texto de las páginas escaneadas (o de
+                    //     todas si el usuario fuerza «Siempre OCR»). Las páginas
+                    //     leídas sustituyen a las de la capa de texto y usan el
+                    //     mismo formato, así que el resto del flujo no cambia.
+                    const ocrMode = trOcrMode();
+                    const ocrPages = trOcrNeededPages(doc, ocrMode);
+                    if (ocrPages.length) {
+                        const ocrLang = trOcrLang();
+                        base(0.04, 'Preparando OCR — ' + item.file.name);
+                        const ocrMap = await trOcrPages(item.file, ocrPages, ocrLang,
+                            (done, tot, frac, fase) => {
+                                base(0.04 + ((done + frac) / Math.max(tot, 1)) * 0.18,
+                                    'OCR: ' + fase + ' — ' + item.file.name);
+                                trProgressStats.textContent = 'OCR ' + Math.min(done + 1, tot) + '/' + tot
+                                    + ' páginas · ' + fase + ' ' + Math.round(frac * 100) + '%';
+                            });
+                        ocrMap.forEach((pg, idx) => { doc.pages[idx] = pg; });
+                    }
+
+                    const totalParas = doc.pages.reduce((a, p) => a + (p.paragraphs ? p.paragraphs.length : 0), 0);
+                    if (!doc.hasText && !totalParas) {
+                        throw new Error(ocrMode === 'nunca'
+                            ? '"' + item.file.name + '" no tiene texto seleccionable. Activa «Páginas escaneadas (OCR)» en las opciones para poder traducirlo.'
+                            : '"' + item.file.name + '": el OCR no detectó texto legible. Prueba con otro «Idioma del documento (OCR)» o con un escaneo de mejor calidad.');
                     }
 
                     // 2) Detectar idioma de origen si está en automático
@@ -3682,6 +4034,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
             trCancelBtn.style.display = 'none';
         } finally {
             isConvertingTr = false;
+            trOcrTerminate();   // libera la memoria del motor OCR (se recarga al reiniciar)
             btnLabel.style.display = 'inline';
             btnSpinner.style.display = 'none';
             convertBtnTr.disabled = false;
