@@ -991,6 +991,34 @@
                             <p class="field-hint" id="trLayoutHint">«PDF diseño» conserva el PDF original (imágenes, tablas y maquetación) y sustituye solo el texto. Requiere idioma destino con alfabeto latino.</p>
                         </div>
 
+                        <div class="field">
+                            <label for="trOcrMode">Páginas escaneadas (OCR)</label>
+                            <select id="trOcrMode" class="tr-select">
+                                <option value="auto" selected>Automático — solo páginas sin texto</option>
+                                <option value="siempre">Siempre OCR — si hay zonas sin detectar</option>
+                                <option value="nunca">Nunca — solo texto real del PDF</option>
+                            </select>
+                            <p class="field-hint">El OCR (Tesseract, dentro de tu navegador) lee el texto de las páginas escaneadas. «Siempre OCR» es lo recomendado si el PDF tiene zonas sin detectar o texto corrupto. La primera vez descarga el idioma (~10–25 MB, queda en caché).</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="trOcrLang">Idioma del documento (OCR)</label>
+                            <select id="trOcrLang" class="tr-select">
+                                <option value="eng+spa" selected>Inglés + Español (mixto)</option>
+                                <option value="spa">Español</option>
+                                <option value="eng">Inglés</option>
+                                <option value="fra">Francés</option>
+                                <option value="deu">Alemán</option>
+                                <option value="por">Portugués</option>
+                                <option value="ita">Italiano</option>
+                                <option value="cat">Catalán</option>
+                                <option value="nld">Neerlandés</option>
+                                <option value="rus">Ruso</option>
+                                <option value="pol">Polaco</option>
+                                <option value="por+eng">Portugués + Inglés</option>
+                            </select>
+                        </div>
+
                         <div class="field checkbox-field">
                             <label class="checkbox-label" for="bilingualCheckTr">
                                 <input type="checkbox" id="bilingualCheckTr">
@@ -1005,7 +1033,7 @@
                             <line x1="12" y1="16" x2="12" y2="12"/>
                             <line x1="12" y1="8" x2="12.01" y2="8"/>
                         </svg>
-                        La traducción necesita internet: el texto se envía a servicios gratuitos (cadena Google → Google alternativo → Lingva → MyMemory con pausa adaptativa). Máx. 50 MB por PDF; los escaneados sin texto no son compatibles. Si algo se interrumpe, el documento se corta limpio hasta donde llegó y la caché local retoma la traducción al reintentar.
+                        La traducción necesita internet: el texto se envía a servicios gratuitos (cadena Google → Google alternativo → Lingva → MyMemory con pausa adaptativa). Máx. 50 MB por PDF. Los escaneados se leen con OCR integrado (Tesseract, en tu navegador; más lento y descarga el idioma la primera vez). Si algo se interrumpe, el documento se corta limpio hasta donde llegó y la caché local retoma la traducción al reintentar.
                     </p>
 
                     <div class="actions">
@@ -1076,6 +1104,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <script src="js/app.js?v=5"></script>
+    <script src="js/app.js?v=6"></script>
 </body>
 </html>
