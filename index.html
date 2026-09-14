@@ -982,11 +982,13 @@
                     <div class="settings-grid">
                         <div class="field">
                             <label>Formato de salida</label>
-                            <div class="segmented" id="trFormatSelector">
+                            <div class="segmented wrap-sm" id="trFormatSelector">
                                 <button class="segment active" data-value="docx">Word</button>
                                 <button class="segment" data-value="pdf">PDF</button>
+                                <button class="segment" data-value="pdf-layout">PDF diseño</button>
                                 <button class="segment" data-value="txt">TXT</button>
                             </div>
+                            <p class="field-hint" id="trLayoutHint">«PDF diseño» conserva el PDF original (imágenes, tablas y maquetación) y sustituye solo el texto. Requiere idioma destino con alfabeto latino.</p>
                         </div>
 
                         <div class="field checkbox-field">
@@ -1074,6 +1076,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <script src="js/app.js?v=4"></script>
+    <script src="js/app.js?v=5"></script>
 </body>
 </html>
