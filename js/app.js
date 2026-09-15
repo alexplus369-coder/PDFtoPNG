@@ -2754,16 +2754,12 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     // parcial, PDF diseño, bilingüe…) funciona sin cambios.
 
     const TR_OCR_MIN_CHARS = 40;   // menos caracteres por página ⇒ escaneada
-    const TR_OCR_SECS_PAGE = 14;   // estimación s/página (para la ETA; render fino + preproceso)
+    const TR_OCR_SECS_PAGE = 10;   // estimación s/página (para la ETA; render fino + preproceso)
     const TR_OCR_MAX_LINES_PARA = 8;  // parte párrafos gigantes (columnas)
-    const TR_OCR_MIN_WORD_CONF = 45;  // confianza mínima de palabra SOLO para descartar ruido
-                                      // evidente (manchas, ornamentos): 68 era demasiado alto y
-                                      // tiraba palabras reales de scans con poco contraste o
-                                      // fuentes pequeñas ANTES de reconstruir la línea, dejando
-                                      // huecos o líneas incompletas que luego el filtro de forma
-                                      // (vocales/mayúsculas, más abajo) también rechazaba por
-                                      // parecer basura. Ahora el conf solo filtra lo evidente y
-                                      // la forma del texto hace el trabajo fino.
+    const TR_OCR_MIN_WORD_CONF = 68;  // confianza mínima de palabra: los disparates del LSTM
+                                      // ("abe Te", "Nee was vided") quedan casi siempre por
+                                      // debajo de 68; con el preproceso de contraste las
+                                      // palabras reales suben a 75-95. Ante la duda, fuera.
 
     // Detecta líneas OCR que son RUIDO leído sobre ilustraciones, capturas
     // de pantalla, filigranas o fuentes decorativas (el caso típico: libros
@@ -2809,55 +2805,6 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const caps = words.filter(w => /^[A-Z\u00C0-\u00DE0-9]{1,3}$/.test(w)).length;
         if (words.length >= 4 && caps / words.length > 0.5) return true;   // «A 4 Mar M7 ZA 7»
         return false;
-    }
-
-    // ¿La región alrededor de un renglón es ARTE (ilustración, captura de
-    // pantalla, textura) en vez de papel plano? Ese es el origen del «texto
-    // sin lógica»: el LSTM lee fuentes decorativas sobre dibujos y produce
-    // disparates que luego se traducen a más disparates. Se mira el BORDE del
-    // renglón (franjas superior e inferior, justo fuera de los glifos): sobre
-    // papel casi todos los píxeles comparten un color dominante; sobre arte
-    // hay tinta dispersa por todas partes. Solo se descarta si TODAS las
-    // franjas disponibles salen ocupadas (un renglón pegado a una imagen por
-    // un solo lado es maqueta normal, no arte).
-    function trOcrRegionIsBusy(ctx, W, H, bbox) {
-        if (!ctx) return false;
-        try {
-            const x0 = Math.max(0, Math.floor(bbox.x0));
-            const x1 = Math.min(W - 1, Math.ceil(bbox.x1));
-            if (x1 - x0 < 8) return false;
-            const h = Math.max(bbox.y1 - bbox.y0, 6);
-            const strips = [];
-            // extensión asimétrica pequeña: el interlineado real deja solo
-            // ~0.25 × cuerpo de hueco arriba (los descendentes de la línea
-            // anterior cuelgan); franjas grandes robarían tinta vecina
-            const t0 = Math.max(0, Math.floor(bbox.y0 - h * 0.34));
-            const t1 = Math.max(0, Math.floor(bbox.y0 - h * 0.08));
-            const b0 = Math.min(H - 1, Math.ceil(bbox.y1 + h * 0.08));
-            const b1 = Math.min(H - 1, Math.ceil(bbox.y1 + h * 0.34));
-            if (t1 - t0 >= 3) strips.push([t0, t1]);
-            if (b1 - b0 >= 3) strips.push([b0, b1]);
-            if (!strips.length) return false;
-            let busyN = 0;
-            for (const s of strips) {
-                const img = ctx.getImageData(x0, s[0], x1 - x0, s[1] - s[0]);
-                const d = img.data;
-                const n = d.length >> 2;
-                if (!n) continue;
-                const hist = new Uint32Array(256);
-                for (let i = 0, j = 0; j < n; i += 4, j++)
-                    hist[(d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0]++;
-                let dom = 0, domV = 0;
-                for (let v = 0; v < 256; v++) if (hist[v] > domV) { domV = hist[v]; dom = v; }
-                let off = 0;
-                for (let i = 0, j = 0; j < n; i += 4, j++) {
-                    const g = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
-                    if (Math.abs(g - dom) > 26) off++;
-                }
-                if (off / n > 0.42) busyN++;
-            }
-            return busyN === strips.length;
-        } catch (e) { return false; }
     }
 
     // Línea CORTA, toda EN MAYÚSCULAS (1-3 tokens de ≤ 4 caracteres) y con
@@ -2920,8 +2867,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         try {
             await worker.setParameters({
                 preserve_interword_spaces: '1',
-                user_defined_dpi: '300',  // el canvas no declara DPI; sin esto Tesseract asume ~70 y lee peor
-                tessedit_pageseg_mode: '3'  // maquetación automática; el reintento en páginas vacías lo cambia a '11' (texto disperso) y lo repone aquí
+                user_defined_dpi: '300'   // el canvas no declara DPI; sin esto Tesseract asume ~70 y lee peor
             });
         } catch (e) { /* opcional */ }
         trOcrWorkers.set(lang, worker);
@@ -2974,13 +2920,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     //   4) PÁRRAFOS por proximidad GLOBAL: cada segmento se engancha al
     //      bloque superior con solape horizontal y alineación reales
     // Devuelve [[{text, bbox}, …], …] — grupos de líneas en píxeles canvas.
-    function trOcrParagraphsFromData(data, canvas) {
-        // contexto para el detector de arte (opcional: sin canvas se salta)
-        let artCtx = null, artW = 0, artH = 0;
-        if (canvas && canvas.width && canvas.height) {
-            try { artCtx = canvas.getContext('2d', { willReadFrequently: true }); } catch (e) { artCtx = null; }
-            artW = canvas.width; artH = canvas.height;
-        }
+    function trOcrParagraphsFromData(data) {
         // 1) aplana palabras (v5: blocks→paragraphs→lines→words; legacy: data.words)
         const raw = [];
         const takeWord = (w) => {
@@ -3018,13 +2958,10 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
 
         // palabras-fantasma: manchas, ornamentos o filigranas leídas como
         // «palabras» enormes de 1-3 caracteres (distorsionan la canaleta y
-        // acaban creando cajas gigantes), o de ALTURA desmedida (3× el cuerpo
-        // real de la página: chispas de una ilustración)
+        // acaban creando cajas gigantes)
         for (let i = raw.length - 1; i >= 0; i--) {
             const w = raw[i];
-            const ww = w.bbox.x1 - w.bbox.x0, wh = w.bbox.y1 - w.bbox.y0;
-            if (ww > contentW * 0.7 && w.text.replace(/\s/g, '').length <= 3) raw.splice(i, 1);
-            else if (wh > medH * 3.2) raw.splice(i, 1);
+            if ((w.bbox.x1 - w.bbox.x0) > contentW * 0.7 && w.text.replace(/\s/g, '').length <= 3) raw.splice(i, 1);
         }
         if (!raw.length) return [];
 
@@ -3090,7 +3027,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
 
         // 4) segmento → línea limpia; descarte de basura y de rótulos
         // falsos en mayúsculas con confianza mediocre
-        let lineObjs = segs.map(s => {
+        const lineObjs = segs.map(s => {
             s.ws.sort((a, b) => a.bbox.x0 - b.bbox.x0);
             const clean = s.ws.filter(w => !wordIsNoise(w.text, w.conf));
             if (!clean.length) return null;   // el segmento era 100 % ruido
@@ -3107,44 +3044,6 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 }
             };
         }).filter(l => l && !trOcrLineIsGarbage(l.text) && !trOcrLineIsSuspect(l));
-        if (!lineObjs.length) return [];
-
-        // 4b) ANTI-ARTE: un renglón con tinta dispersa por ARRIBA y por
-        // ABAJO está leído sobre una ilustración/captura/textura (fuentes
-        // decorativas, rótulos de vídeo): su «texto» es disparato seguro y
-        // su caja taparía el dibujo. Se descarta antes de traducir nada.
-        if (artCtx) {
-            // El veto solo se aplica a líneas de confianza mediocre/nula: un
-            // pie de foto real (texto superpuesto a una imagen, muy común en
-            // revistas y maquetas) se lee con confianza alta y NO debe
-            // perderse solo porque el fondo es "ocupado". El filtro anti-arte
-            // sigue protegiendo el caso que motivó su creación (disparates
-            // del LSTM sobre ilustraciones), que casi siempre vienen con
-            // confianza baja.
-            lineObjs = lineObjs.filter(l => (l.conf != null && l.conf >= 80) || !trOcrRegionIsBusy(artCtx, artW, artH, l.bbox));
-            if (!lineObjs.length) return [];
-        }
-
-        // 4c) líneas DOBLES: dos lecturas que ocupan el MISMO sitio (solape
-        // grande en X e Y) apilan cajas y textos unos sobre otros — una de
-        // las causas visibles del desorden. Se queda la de mayor confianza.
-        lineObjs.sort((a, b) => ((b.conf != null ? b.conf : 0) - (a.conf != null ? a.conf : 0)));
-        const keptLines = [];
-        for (const L of lineObjs) {
-            const a = L.bbox;
-            let clash = false;
-            for (const K of keptLines) {
-                const b = K.bbox;
-                const ox = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
-                const oy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-                if (ox <= 0 || oy <= 0) continue;
-                const aA = Math.max(1, (a.x1 - a.x0) * (a.y1 - a.y0));
-                const bA = Math.max(1, (b.x1 - b.x0) * (b.y1 - b.y0));
-                if ((ox * oy) / Math.min(aA, bA) > 0.35) { clash = true; break; }
-            }
-            if (!clash) keptLines.push(L);
-        }
-        lineObjs = keptLines;
         if (!lineObjs.length) return [];
 
         // 5) párrafos por PROXIMIDAD GLOBAL (no en secuencia de proceso):
@@ -3230,9 +3129,9 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     s + Math.max(0, l.bbox.x1 - l.bbox.x0) * Math.max(0, l.bbox.y1 - l.bbox.y0), 0);
                 const fill = linesArea / areaPx;              // cuánta caja llenan las líneas
                 if (!/\d/.test(text) && text.length < 4) continue;          // fragmento inútil
-                if (dens < 0.0005) continue;                  // muy disperso ⇒ ruido de imagen
-                if (fill < 0.16 && areaPx > pageArea * 0.05) continue;      // líneas dispersas en caja grande
-                if (bh > vp.height * 0.45 && fill < 0.35) continue;         // media página y hueca
+                if (dens < 0.0008) continue;                  // muy disperso ⇒ ruido de imagen
+                if (fill < 0.25 && areaPx > pageArea * 0.03) continue;      // líneas dispersas en caja grande
+                if (bh > vp.height * 0.45 && fill < 0.5) continue;          // media página y hueca
                 // Geometría por LÍNEA (no solo el bloque): el generador de
                 // diseño dibuja una tapa fina por renglón en vez de un solo
                 // rectángulo del bloque entero. «size» es el cuerpo real de
@@ -3281,14 +3180,14 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         return need;
     }
 
-    // Renderiza una página a canvas a ~2600 px de ancho (Óptimo OCR) y
+    // Renderiza una página a canvas a ~2000 px de ancho (Óptimo OCR) y
     // aplica pre-proceso de contraste. La resolución importa: el texto
-    // pequeño de maquetas densas (recuadros, notas) a 2000 px queda con
+    // pequeño de maquetas densas (recuadros, notas) a 1700 px queda con
     // glifos de ~10 px que el LSTM confunde («evil»→«evi», «foretold»→«doomed»).
     async function trOcrRenderPage(pdf, pageNum) {
         const page = await pdf.getPage(pageNum);
         const vp1 = page.getViewport({ scale: 1 });
-        const scale = Math.min(4.5, Math.max(2.2, 3000 / vp1.width));
+        const scale = Math.min(4, Math.max(2, 2000 / vp1.width));
         const vp = page.getViewport({ scale: scale });
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.floor(vp.width));
@@ -3366,32 +3265,8 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 trOcrStatusCb = null;
                 throw new Error('el OCR falló en la página ' + (pi + 1) + ': ' + ((e && e.message) || e));
             }
-            // el canvas se libera DESPUÉS de extraer los párrafos: el
-            // detector de arte necesita medir los píxeles del renglón
-            let ocrPage = trOcrBuildPage(trOcrParagraphsFromData(res.data, rendered.canvas), rendered.vp);
-            // Reintento con PSM "texto disperso": en páginas-collage (muchas
-            // ilustraciones con recuadros de texto sueltos, p. ej. una
-            // infografía o una página de wiki ilustrada) el análisis de
-            // maquetación automático (PSM 3) intenta reconocer columnas y
-            // párrafos "normales" y de paso fusiona o directamente ignora
-            // esos recuadros aislados: la página sale vacía aunque el motor
-            // sí podría leerlos. PSM 11 trata cada fragmento como
-            // independiente sin asumir estructura, así que se usa como
-            // segunda pasada SOLO cuando la primera no rescató nada.
-            if (!ocrPage.paragraphs.length && !trCancelRequested) {
-                try {
-                    await worker.setParameters({ tessedit_pageseg_mode: '11' });
-                    const res2 = await worker.recognize(rendered.canvas);
-                    await worker.setParameters({ tessedit_pageseg_mode: '3' });
-                    const retryPage = trOcrBuildPage(trOcrParagraphsFromData(res2.data, rendered.canvas), rendered.vp);
-                    if (retryPage.paragraphs.length) ocrPage = retryPage;
-                } catch (e) {
-                    try { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } catch (e2) {}
-                    // si el reintento falla, se deja la página como salió (posiblemente vacía)
-                }
-            }
             rendered.canvas.width = 0; rendered.canvas.height = 0;
-            out.set(pi, ocrPage);
+            out.set(pi, trOcrBuildPage(trOcrParagraphsFromData(res.data), rendered.vp));
             if (onProgress) onProgress(k + 1, pageIdxs.length, 1, 'página lista');
         }
         trOcrStatusCb = null;
@@ -3402,7 +3277,6 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     // los filtros OCR desde la consola o tests automatizados.
     window.__trOcrDebug = {
         lineIsGarbage: trOcrLineIsGarbage,
-        regionIsBusy: trOcrRegionIsBusy,
         paragraphsFromData: trOcrParagraphsFromData,
         buildPage: trOcrBuildPage,
         mergePage: trMergeOcrPage,
@@ -3893,116 +3767,44 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 // 1) tapar el texto original con el color de fondo real
                 const bg = bgColor(geo);
 
-                // --- Bloques OCR: tapa POR RENGLÓN (jamás un rectángulo de bloque) ---
-                // Cada renglón original se cubre SOLO con su propia caja
-                // (bbox del OCR + 1.5 pt), pintada con el color dominante de
-                // ESA franja: una ilustración entre dos renglones nunca queda
-                // tapada y dos bloques vecinos ya no se comen entre sí (las
-                // «zonas exageradas» venían del rectángulo de bloque entero).
-                // La traducción se re-lienea al ancho del bloque y se encoje
-                // hasta el 45 % para caber en la MISMA altura; si aun así no
-                // cabe, se recorta con «…»: perder el final de un párrafo es
-                // preferible a invadir el diseño vecino. Y si el fondo de
-                // algún renglón no es plano (arte, captura, textura), el
-                // bloque entero se deja intacto: mejor sin traducir que una
-                // caja de color sobre el dibujo.
+                // --- Bloques OCR: tapa FINA y ajustada al texto real ---
+                // El fondo se dibuja SOLO del tamaño exacto del bloque de
+                // traducción que se va a escribir (calculado tras re-lienar),
+                // nunca un rectángulo genérico alrededor del bloque original:
+                // así no vuelven las «zonas exageradas» sobre el diseño.
                 if (geo.ocr) {
-                    const Ls = (Array.isArray(geo.ocrLines) && geo.ocrLines.length)
-                        ? geo.ocrLines
-                        : [{ x0: geo.x0, x1: geo.x1, yTop: geo.yTop, yBot: geo.yBot }];
-                    const bx0 = Math.min.apply(null, Ls.map(l => l.x0));
-                    const bx1 = Math.max.apply(null, Ls.map(l => l.x1));
-                    const byTop = Math.max.apply(null, Ls.map(l => l.yTop));
-                    const byBot = Math.min.apply(null, Ls.map(l => l.yBot));
-                    const boxWo = Math.max(bx1 - bx0, geo.size * 2.2);
-                    const origH = Math.max(byTop - byBot, geo.size * 1.1);
-
-                    // fondo de UN renglón: color dominante real + ¿es plano?
-                    const lineBg = (L) => {
-                        if (!cctx) return { flat: true, color: [1, 1, 1] };
-                        try {
-                            const px0 = Math.max(0, Math.round(L.x0 - 1));
-                            const px1 = Math.min(cvsW - 1, Math.round(L.x1 + 1));
-                            const py0 = Math.max(0, Math.round(cvsH - L.yTop - 1));
-                            const py1 = Math.min(cvsH - 1, Math.round(cvsH - L.yBot + 1));
-                            if (px1 - px0 < 4 || py1 - py0 < 3) return { flat: true, color: [1, 1, 1] };
-                            const d = cctx.getImageData(px0, py0, px1 - px0, py1 - py0).data;
-                            const n = d.length >> 2;
-                            const votes = new Map();
-                            for (let i = 0; i < n; i++) {
-                                const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
-                                const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4);
-                                const v = votes.get(key);
-                                if (v) { v.n++; v.r += r; v.g += g; v.b += b; }
-                                else votes.set(key, { n: 1, r: r, g: g, b: b });
-                            }
-                            let best = null;
-                            votes.forEach(v => { if (!best || v.n > best.n) best = v; });
-                            return {
-                                flat: (best.n / n) >= 0.5,
-                                color: [best.r / best.n / 255, best.g / best.n / 255, best.b / best.n / 255]
-                            };
-                        } catch (e) { return { flat: true, color: [1, 1, 1] }; }
-                    };
-                    const infos = Ls.map(lineBg);
-                    if (!infos.every(inf => inf.flat)) continue;   // hay arte: se respeta el original
-
-                    // 1) tapar CADA renglón con su color local (tapa fina)
-                    Ls.forEach((L, i) => {
-                        const c = infos[i].color;
-                        page.drawRectangle({
-                            x: L.x0 - 1.5, y: L.yBot - 1.5,
-                            width: (L.x1 - L.x0) + 3,
-                            height: (L.yTop - L.yBot) + 3,
-                            color: rgb(c[0], c[1], c[2])
-                        });
-                    });
-
-                    // 2) encajar la traducción en la altura ORIGINAL del bloque
+                    const boxWo = Math.max(geo.x1 - geo.x0, geo.size * 2.2);
                     const fontO = pick(negrita, geo.italic);
-                    const fitH = origH + geo.size * 0.2;
-                    const computeAt = (fs) => {
-                        const lT = trWrapPdf(trans, fontO, fs, boxWo);
-                        const fs2 = bilingual && orig ? Math.max(fs * 0.52, 4) : 0;
-                        const l2 = (bilingual && orig) ? trWrapPdf(orig, F.reg, fs2, boxWo) : [];
-                        const hgt = lT.length * fs * 1.24 +
-                            (l2.length ? fs * 0.3 + l2.length * fs2 * 1.2 : 0);
-                        return { lT: lT, fs2: fs2, l2: l2, hgt: hgt };
-                    };
                     let fsOcr = geo.size;
-                    let st = computeAt(fsOcr);
-                    while (st.hgt > fitH && fsOcr > geo.size * 0.45) {
+                    let lnOcr = trWrapPdf(trans, fontO, fsOcr, boxWo);
+                    const fitH = (geo.yTop - geo.yBot) + geo.size * 0.55;
+                    while (lnOcr.length * fsOcr * 1.24 > fitH && fsOcr > geo.size * 0.58) {
                         fsOcr *= 0.93;
-                        st = computeAt(fsOcr);
+                        lnOcr = trWrapPdf(trans, fontO, fsOcr, boxWo);
                     }
-                    if (st.hgt > fitH) {
-                        // se llegó al piso sin caber: recorte con «…» dentro
-                        // de la caja original (jamás desbordar al vecino)
-                        fsOcr = geo.size * 0.45;
-                        st = computeAt(fsOcr);
-                        const extraOr = st.l2.length ? fsOcr * 0.3 + st.l2.length * st.fs2 * 1.2 : 0;
-                        const maxRows = Math.max(1, Math.floor(Math.max(fitH - extraOr, fsOcr * 1.24) / (fsOcr * 1.24)));
-                        if (maxRows < st.lT.length) {
-                            st.lT = st.lT.slice(0, maxRows);
-                            st.lT[maxRows - 1] = st.lT[maxRows - 1].replace(/[\s,;:.]+$/, '') + '\u2026';
-                        }
-                    }
-
-                    // 3) escribir la traducción dentro del bloque original
                     const leadO = fsOcr * 1.24;
-                    let yo = byTop - fsOcr * 0.88;
-                    const xOcr = centrado
-                        ? bx0 + (boxWo - fontO.widthOfTextAtSize(st.lT[0] || '', fsOcr)) / 2
-                        : bx0;
-                    for (const ln of st.lT) {
+                    const fsOr = bilingual && orig ? Math.max(fsOcr * 0.52, 5) : 0;
+                    const lnOr = (bilingual && orig) ? trWrapPdf(orig, F.reg, fsOr, boxWo) : [];
+                    const blockH = lnOcr.length * leadO +
+                        (lnOr.length ? fsOcr * 0.3 + lnOr.length * fsOr * 1.2 : 0);
+                    const pX = 1.5, pT = geo.size * 0.32, pB = geo.size * 0.2;
+                    page.drawRectangle({
+                        x: geo.x0 - pX, y: geo.yTop + pT - blockH - pB,
+                        width: Math.max(boxWo, 4) + pX * 2,
+                        height: blockH + pT + pB,
+                        color: rgb(bg[0], bg[1], bg[2])
+                    });
+                    let yo = geo.yTop + pT - fsOcr * 0.9;
+                    const xOcr = centrado ? geo.x0 + (boxWo - fontO.widthOfTextAtSize(lnOcr[0] || '', fsOcr)) / 2 : geo.x0;
+                    for (const ln of lnOcr) {
                         page.drawText(ln, { x: xOcr, y: yo, size: fsOcr, font: fontO, color: NEGRO });
                         yo -= leadO;
                     }
-                    if (st.l2.length) {
+                    if (lnOr.length) {
                         yo -= fsOcr * 0.3;
-                        for (const ln of st.l2) {
-                            page.drawText(ln, { x: bx0, y: yo, size: st.fs2, font: F.reg, color: GRIS });
-                            yo -= st.fs2 * 1.2;
+                        for (const ln of lnOr) {
+                            page.drawText(ln, { x: geo.x0, y: yo, size: fsOr, font: F.reg, color: GRIS });
+                            yo -= fsOr * 1.2;
                         }
                     }
                     continue;
