@@ -1,0 +1,18 @@
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const src = fs.readFileSync(require('path').join(__dirname, '../js/app.js'),'utf8');
+const start = src.indexOf('    const TR_OCR_MIN_CHARS');
+const end = src.indexOf('    // ===== Control de parada', start);
+const ctx = {window:{}, console}; vm.createContext(ctx); vm.runInContext(src.slice(start,end),ctx);
+const ocr=ctx.window.__trOcrDebug;
+const word=(text,x,y,confidence=95)=>({text,confidence,bbox:{x0:x,y0:y,x1:x+40,y1:y+20}});
+const line=(words)=>({words,bbox:{x0:words[0].bbox.x0,y0:words[0].bbox.y0,x1:words.at(-1).bbox.x1,y1:words[0].bbox.y1}});
+const data={blocks:[{paragraphs:[{lines:[line([word('Villa',10,10),word('Chianti',55,10,40),word('sits',100,10)]),line([word('within',10,40),word('an',55,40),word('orchard',100,40)])]},{lines:[line([word('NASA',250,10),word('2026',295,10)])]}]}]};
+const groups=ocr.paragraphsFromData(data);
+assert.equal(groups.length,2);assert.equal(groups[0].length,2);
+assert.equal(groups[0][0].text,'Villa Chianti sits');assert.equal(groups[1][0].text,'NASA 2026');
+const page=ocr.buildPage(groups,{width:600,height:800,convertToPdfPoint:(x,y)=>[x,800-y]});
+assert.equal(page.paragraphs[0],'Villa Chianti sits within an orchard');
+assert.equal(page.geo[0].yBot,740);assert.equal(page.geo[0].yTop,790);
+const noise={blocks:[{paragraphs:[{lines:[line([word('noise',10,10,10)])]}]}]};
+assert.equal(ocr.paragraphsFromData(noise).length,0);
+console.log('PASS: complete sentences, uncertain words, separate columns, acronyms, geometry and low-confidence rejection');

@@ -1,5 +1,20 @@
 # 📄 PDF Tools (100% Client-Side)
 
+## Corrección OCR — septiembre 2026
+
+Esta revisión sustituye las reglas anteriores de filtrado y ajuste OCR:
+
+- Prioriza las líneas y párrafos nativos de Tesseract; conserva palabras de baja confianza dentro de una línea fiable, sin mutilar frases ni descartar siglas por falta de vocales. La reconstrucción antigua queda como respaldo para salidas sin bloques.
+- Descarta líneas completas con confianza media ponderada inferior a 55; el reconocimiento sigue pudiendo cometer errores.
+- Estima el tamaño inicial a partir de la altura de los glifos (factor 1.05).
+- Cubre el rectángulo original completo y ajusta conjuntamente traducción y texto bilingüe. Si no caben con un mínimo de 5 puntos o 65 % del cuerpo inicial, genera el PDF reformateado mediante el mecanismo de respaldo.
+- Los reintentos parten del texto digital, evitando reutilizar OCR de otro idioma o modo.
+- Validación: sintaxis JavaScript y pruebas de frases completas, columnas separadas, siglas, confianza y coordenadas. Pendiente prueba integral en navegador con los servicios externos.
+
+El ZIP incluye la estructura correcta: `index.html`, `js/app.js`, `css/style.css` y `api/translate.js`.
+
+
+
 Conversor de PDF a PNG/JPEG que funciona completamente en el navegador.  
 **Sin servidor, sin subidas, sin dependencias del sistema.** Ideal para GitHub Pages.
 
