@@ -2921,6 +2921,47 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     //      bloque superior con solape horizontal y alineación reales
     // Devuelve [[{text, bbox}, …], …] — grupos de líneas en píxeles canvas.
     function trOcrParagraphsFromData(data) {
+        // Prefer complete native lines and paragraph boundaries. Never remove
+        // uncertain words from an otherwise reliable sentence.
+        if (Array.isArray(data.blocks) && data.blocks.some(b => (b.paragraphs || []).length)) {
+            const groups = [];
+            for (const block of data.blocks) {
+                for (const para of block.paragraphs || []) {
+                    let group = [];
+                    const flush = () => { if (group.length) groups.push(group); group = []; };
+                    for (const line of para.lines || []) {
+                        const words = (line.words || []).filter(w => w.bbox && String(w.text || '').trim());
+                        const text = (words.length ? words.map(w => w.text).join(' ') : String(line.text || '')).replace(/\s+/g, ' ').trim();
+                        const bbox = line.bbox;
+                        const known = words.filter(w => Number.isFinite(w.confidence));
+                        const conf = known.length ? known.reduce((n, w) => n + w.confidence * w.text.length, 0) /
+                            known.reduce((n, w) => n + w.text.length, 0) : line.confidence;
+                        if (!bbox || bbox.x1 <= bbox.x0 || bbox.y1 <= bbox.y0 ||
+                            !/[\p{L}\p{N}]/u.test(text) || (Number.isFinite(conf) && conf < 55)) {
+                            flush(); continue;
+                        }
+                        // Split large internal gutters without discarding any tokens.
+                        const parts = [];
+                        for (const word of words) {
+                            const last = parts[parts.length - 1];
+                            if (!last || word.bbox.x0 - last[last.length - 1].bbox.x1 > (bbox.y1 - bbox.y0) * 2.5)
+                                parts.push([word]);
+                            else last.push(word);
+                        }
+                        if (parts.length > 1) {
+                            flush();
+                            for (const part of parts) groups.push([{
+                                text: part.map(w => w.text).join(' '), conf,
+                                bbox: { x0: Math.min(...part.map(w => w.bbox.x0)), x1: Math.max(...part.map(w => w.bbox.x1)),
+                                    y0: Math.min(...part.map(w => w.bbox.y0)), y1: Math.max(...part.map(w => w.bbox.y1)) }
+                            }]);
+                        } else group.push({ text, bbox, conf });
+                    }
+                    flush();
+                }
+            }
+            return groups;
+        }
         // 1) aplana palabras (v5: blocks→paragraphs→lines→words; legacy: data.words)
         const raw = [];
         const takeWord = (w) => {
@@ -3147,7 +3188,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 }).filter(l => l.x1 - l.x0 > 0.5 && l.h > 2);
                 if (!ls.length) continue;
                 const hsrt = ls.map(l => l.h).slice().sort((a, b) => a - b);
-                const size = Math.max(hsrt[Math.floor(hsrt.length / 2)] * 0.74, 4.5);
+                const size = Math.max(hsrt[Math.floor(hsrt.length / 2)] * 1.05, 4.5);
                 let leading = size * 1.3;
                 if (ls.length > 1) {
                     const step = Math.abs(ls[0].yTop - ls[ls.length - 1].yTop) / (ls.length - 1);
@@ -3773,32 +3814,32 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 // nunca un rectángulo genérico alrededor del bloque original:
                 // así no vuelven las «zonas exageradas» sobre el diseño.
                 if (geo.ocr) {
-                    const boxWo = Math.max(geo.x1 - geo.x0, geo.size * 2.2);
+                    const boxWo = geo.x1 - geo.x0;
+                    const fitH = geo.yTop - geo.yBot;
+                    if (boxWo <= 0 || fitH <= 0) continue;
                     const fontO = pick(negrita, geo.italic);
-                    let fsOcr = geo.size;
-                    let lnOcr = trWrapPdf(trans, fontO, fsOcr, boxWo);
-                    const fitH = (geo.yTop - geo.yBot) + geo.size * 0.55;
-                    while (lnOcr.length * fsOcr * 1.24 > fitH && fsOcr > geo.size * 0.58) {
-                        fsOcr *= 0.93;
+                    const minSize = Math.max(5, geo.size * 0.65);
+                    let fsOcr = Math.max(minSize, geo.size), lnOcr, lnOr, fsOr, blockH;
+                    for (;;) {
                         lnOcr = trWrapPdf(trans, fontO, fsOcr, boxWo);
+                        fsOr = bilingual && orig ? Math.max(fsOcr * 0.7, 5) : 0;
+                        lnOr = fsOr ? trWrapPdf(orig, F.reg, fsOr, boxWo) : [];
+                        blockH = lnOcr.length * fsOcr * 1.2 +
+                            (lnOr.length ? fsOcr * 0.3 + lnOr.length * fsOr * 1.2 : 0);
+                        if (blockH <= fitH || fsOcr <= minSize) break;
+                        fsOcr = Math.max(minSize, fsOcr * 0.95);
                     }
-                    const leadO = fsOcr * 1.24;
-                    const fsOr = bilingual && orig ? Math.max(fsOcr * 0.52, 5) : 0;
-                    const lnOr = (bilingual && orig) ? trWrapPdf(orig, F.reg, fsOr, boxWo) : [];
-                    const blockH = lnOcr.length * leadO +
-                        (lnOr.length ? fsOcr * 0.3 + lnOr.length * fsOr * 1.2 : 0);
-                    const pX = 1.5, pT = geo.size * 0.32, pB = geo.size * 0.2;
-                    page.drawRectangle({
-                        x: geo.x0 - pX, y: geo.yTop + pT - blockH - pB,
-                        width: Math.max(boxWo, 4) + pX * 2,
-                        height: blockH + pT + pB,
-                        color: rgb(bg[0], bg[1], bg[2])
-                    });
-                    let yo = geo.yTop + pT - fsOcr * 0.9;
-                    const xOcr = centrado ? geo.x0 + (boxWo - fontO.widthOfTextAtSize(lnOcr[0] || '', fsOcr)) / 2 : geo.x0;
+                    if (blockH > fitH || lnOcr.some(ln => fontO.widthOfTextAtSize(ln, fsOcr) > boxWo)) {
+                        throw new Error('la traducción OCR no cabe con letra legible en la página ' + (p + 1));
+                    }
+                    // Mask the entire source area, even when the translation is shorter.
+                    page.drawRectangle({ x: geo.x0 - 0.5, y: geo.yBot - 0.5,
+                        width: boxWo + 1, height: fitH + 1, color: rgb(...bg) });
+                    let yo = geo.yTop - fsOcr;
                     for (const ln of lnOcr) {
-                        page.drawText(ln, { x: xOcr, y: yo, size: fsOcr, font: fontO, color: NEGRO });
-                        yo -= leadO;
+                        const x = centrado ? geo.x0 + (boxWo - fontO.widthOfTextAtSize(ln, fsOcr)) / 2 : geo.x0;
+                        page.drawText(ln, { x, y: yo, size: fsOcr, font: fontO, color: NEGRO });
+                        yo -= fsOcr * 1.2;
                     }
                     if (lnOr.length) {
                         yo -= fsOcr * 0.3;
@@ -4173,6 +4214,8 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                             base(0.02 + f * 0.18, 'Extrayendo texto (' + Math.round(f * 100) + '%) — ' + item.file.name));
                         item.doc = doc;
                     }
+
+                    doc = { ...doc, pages: doc.pages.map(pg => ({ ...pg, paragraphs: pg.paragraphs.slice(), geo: pg.geo.slice() })) };
 
                     // 1b) OCR: lee el texto de las páginas escaneadas (o de
                     //     todas si el usuario fuerza «Siempre OCR»). El
