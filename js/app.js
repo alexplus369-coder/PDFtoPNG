@@ -2756,10 +2756,14 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     const TR_OCR_MIN_CHARS = 40;   // menos caracteres por página ⇒ escaneada
     const TR_OCR_SECS_PAGE = 14;   // estimación s/página (para la ETA; render fino + preproceso)
     const TR_OCR_MAX_LINES_PARA = 8;  // parte párrafos gigantes (columnas)
-    const TR_OCR_MIN_WORD_CONF = 68;  // confianza mínima de palabra: los disparates del LSTM
-                                      // ("abe Te", "Nee was vided") quedan casi siempre por
-                                      // debajo de 68; con el preproceso de contraste las
-                                      // palabras reales suben a 75-95. Ante la duda, fuera.
+    const TR_OCR_MIN_WORD_CONF = 45;  // confianza mínima de palabra SOLO para descartar ruido
+                                      // evidente (manchas, ornamentos): 68 era demasiado alto y
+                                      // tiraba palabras reales de scans con poco contraste o
+                                      // fuentes pequeñas ANTES de reconstruir la línea, dejando
+                                      // huecos o líneas incompletas que luego el filtro de forma
+                                      // (vocales/mayúsculas, más abajo) también rechazaba por
+                                      // parecer basura. Ahora el conf solo filtra lo evidente y
+                                      // la forma del texto hace el trabajo fino.
 
     // Detecta líneas OCR que son RUIDO leído sobre ilustraciones, capturas
     // de pantalla, filigranas o fuentes decorativas (el caso típico: libros
@@ -2916,7 +2920,8 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         try {
             await worker.setParameters({
                 preserve_interword_spaces: '1',
-                user_defined_dpi: '300'   // el canvas no declara DPI; sin esto Tesseract asume ~70 y lee peor
+                user_defined_dpi: '300',  // el canvas no declara DPI; sin esto Tesseract asume ~70 y lee peor
+                tessedit_pageseg_mode: '3'  // maquetación automática; el reintento en páginas vacías lo cambia a '11' (texto disperso) y lo repone aquí
             });
         } catch (e) { /* opcional */ }
         trOcrWorkers.set(lang, worker);
@@ -3109,7 +3114,14 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         // decorativas, rótulos de vídeo): su «texto» es disparato seguro y
         // su caja taparía el dibujo. Se descarta antes de traducir nada.
         if (artCtx) {
-            lineObjs = lineObjs.filter(l => !trOcrRegionIsBusy(artCtx, artW, artH, l.bbox));
+            // El veto solo se aplica a líneas de confianza mediocre/nula: un
+            // pie de foto real (texto superpuesto a una imagen, muy común en
+            // revistas y maquetas) se lee con confianza alta y NO debe
+            // perderse solo porque el fondo es "ocupado". El filtro anti-arte
+            // sigue protegiendo el caso que motivó su creación (disparates
+            // del LSTM sobre ilustraciones), que casi siempre vienen con
+            // confianza baja.
+            lineObjs = lineObjs.filter(l => (l.conf != null && l.conf >= 80) || !trOcrRegionIsBusy(artCtx, artW, artH, l.bbox));
             if (!lineObjs.length) return [];
         }
 
@@ -3218,9 +3230,9 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     s + Math.max(0, l.bbox.x1 - l.bbox.x0) * Math.max(0, l.bbox.y1 - l.bbox.y0), 0);
                 const fill = linesArea / areaPx;              // cuánta caja llenan las líneas
                 if (!/\d/.test(text) && text.length < 4) continue;          // fragmento inútil
-                if (dens < 0.0008) continue;                  // muy disperso ⇒ ruido de imagen
-                if (fill < 0.25 && areaPx > pageArea * 0.03) continue;      // líneas dispersas en caja grande
-                if (bh > vp.height * 0.45 && fill < 0.5) continue;          // media página y hueca
+                if (dens < 0.0005) continue;                  // muy disperso ⇒ ruido de imagen
+                if (fill < 0.16 && areaPx > pageArea * 0.05) continue;      // líneas dispersas en caja grande
+                if (bh > vp.height * 0.45 && fill < 0.35) continue;         // media página y hueca
                 // Geometría por LÍNEA (no solo el bloque): el generador de
                 // diseño dibuja una tapa fina por renglón en vez de un solo
                 // rectángulo del bloque entero. «size» es el cuerpo real de
@@ -3276,7 +3288,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
     async function trOcrRenderPage(pdf, pageNum) {
         const page = await pdf.getPage(pageNum);
         const vp1 = page.getViewport({ scale: 1 });
-        const scale = Math.min(4, Math.max(2, 2600 / vp1.width));
+        const scale = Math.min(4.5, Math.max(2.2, 3000 / vp1.width));
         const vp = page.getViewport({ scale: scale });
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.floor(vp.width));
@@ -3356,7 +3368,28 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
             }
             // el canvas se libera DESPUÉS de extraer los párrafos: el
             // detector de arte necesita medir los píxeles del renglón
-            const ocrPage = trOcrBuildPage(trOcrParagraphsFromData(res.data, rendered.canvas), rendered.vp);
+            let ocrPage = trOcrBuildPage(trOcrParagraphsFromData(res.data, rendered.canvas), rendered.vp);
+            // Reintento con PSM "texto disperso": en páginas-collage (muchas
+            // ilustraciones con recuadros de texto sueltos, p. ej. una
+            // infografía o una página de wiki ilustrada) el análisis de
+            // maquetación automático (PSM 3) intenta reconocer columnas y
+            // párrafos "normales" y de paso fusiona o directamente ignora
+            // esos recuadros aislados: la página sale vacía aunque el motor
+            // sí podría leerlos. PSM 11 trata cada fragmento como
+            // independiente sin asumir estructura, así que se usa como
+            // segunda pasada SOLO cuando la primera no rescató nada.
+            if (!ocrPage.paragraphs.length && !trCancelRequested) {
+                try {
+                    await worker.setParameters({ tessedit_pageseg_mode: '11' });
+                    const res2 = await worker.recognize(rendered.canvas);
+                    await worker.setParameters({ tessedit_pageseg_mode: '3' });
+                    const retryPage = trOcrBuildPage(trOcrParagraphsFromData(res2.data, rendered.canvas), rendered.vp);
+                    if (retryPage.paragraphs.length) ocrPage = retryPage;
+                } catch (e) {
+                    try { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } catch (e2) {}
+                    // si el reintento falla, se deja la página como salió (posiblemente vacía)
+                }
+            }
             rendered.canvas.width = 0; rendered.canvas.height = 0;
             out.set(pi, ocrPage);
             if (onProgress) onProgress(k + 1, pageIdxs.length, 1, 'página lista');
