@@ -1,8 +1,11 @@
 // Proxy de traducción para Vercel (plan gratuito Hobby).
-// Cadena interna: Google gtx → Google dict-chrome-ex → MyMemory (API oficial).
+// Reenvía el texto a una CADENA de servicios gratuitos y devuelve JSON { text, detected }.
 // No almacena nada. Solo acepta POST con { text, sl, tl }.
+// Cadena interna: Google gtx → Google dict-chrome-ex → MyMemory (API oficial).
+// Motivo: Google a veces devuelve 429 a las IPs compartidas de datacenter de Vercel;
+// con esta cadena el proxy sigue funcionando aunque un servicio se agote.
 
-const MYMEMORY_EMAIL = 'a7daga@gmail.com'; // opcional: tu email duplica la cuota diaria gratuita de MyMemory
+const MYMEMORY_EMAIL = ''; // opcional: tu email duplica la cuota diaria gratuita de MyMemory
 
 const TIMEOUT_MS = 6000; // por servicio (3 servicios = 18 s < 20 s del navegador)
 
@@ -95,5 +98,25 @@ module.exports = async (req, res) => {
     res.status(502).json({ error: ultimoError });
 };
 
-// Tiempo máximo en Vercel (3 servicios × 6 s = 18 s < 20 s del navegador)
+// Tiempo máximo de la función en Vercel (Hobby permite hasta 60 s; 3 servicios × 6 s = 18 s)
 module.exports.maxDuration = 20;
+
+// Autotest local:  node api/translate.js "Texto a traducir" en es
+if (require.main === module) {
+    const texto = process.argv[2] || 'Hello world, this is a test.';
+    const sl = process.argv[3] || 'en';
+    const tl = process.argv[4] || 'es';
+    (async () => {
+        for (const fn of CADENA) {
+            try {
+                const r = await fn(texto, sl, tl);
+                console.log('OK via ' + fn.name + ' -> ' + JSON.stringify(r));
+                process.exit(0);
+            } catch (e) {
+                console.log('fallo ' + fn.name + ' -> ' + String((e && e.message) || e));
+            }
+        }
+        console.log('TODOS los servicios fallaron desde esta IP');
+        process.exit(1);
+    })();
+}
