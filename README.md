@@ -7,7 +7,7 @@ Esta revisión sustituye las reglas anteriores de filtrado y ajuste OCR:
 - Prioriza las líneas y párrafos nativos de Tesseract; conserva palabras de baja confianza dentro de una línea fiable, sin mutilar frases ni descartar siglas por falta de vocales. La reconstrucción antigua queda como respaldo para salidas sin bloques.
 - Descarta líneas completas con confianza media ponderada inferior a 55; el reconocimiento sigue pudiendo cometer errores.
 - Estima el tamaño inicial a partir de la altura de los glifos (factor 1.05).
-- Cubre el rectángulo original completo y ajusta conjuntamente traducción y texto bilingüe. Si no caben con un mínimo de 5 puntos o 65 % del cuerpo inicial, genera el PDF reformateado mediante el mecanismo de respaldo.
+- Cubre el rectángulo original completo y ajusta conjuntamente traducción y texto bilingüe. Si no caben con un mínimo de 5 puntos o 65 % del cuerpo inicial, conserva ese bloque original y entrega su traducción en un TXT complementario. PDF diseño nunca cambia automáticamente al formato reformateado.
 - Los reintentos parten del texto digital, evitando reutilizar OCR de otro idioma o modo.
 - Validación: sintaxis JavaScript y pruebas de frases completas, columnas separadas, siglas, confianza y coordenadas. Pendiente prueba integral en navegador con los servicios externos.
 
@@ -56,7 +56,7 @@ El formato **PDF diseño** reabre el PDF original y sustituye **solo el texto**:
 - ✅ Detecta **celdas de tabla e índices** y traduce cada celda en su sitio
 - ✅ Compatible con el modo bilingüe, la caché y el corte parcial
 - ⚠️ Solo idiomas destino con **alfabeto latino** (para CJK/árabe/cirílico usa el PDF reformateado, que sí soporta todos los alfabetos)
-- ⚠️ Los PDFs con **páginas rotadas** caen automáticamente al PDF reformateado
+- ⚠️ Las **páginas rotadas** se conservan intactas y su traducción se entrega en TXT
 - ⚠️ El texto original queda **oculto debajo de la traducción** (sigue siendo localizable con buscar/copiar en algunos lectores)
 - ⚠️ En bloques muy ajustados el cuerpo de letra se reduce hasta un 45 % para que la traducción quepa (el español es ~15-20 % más largo que el inglés)
 

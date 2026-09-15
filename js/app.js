@@ -3685,7 +3685,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         return lines.length ? lines : [''];
     }
 
-    async function trBuildPdfLayout(file, origPages, transPages, bilingual, onProgress) {
+    async function trBuildPdfLayout(file, origPages, transPages, bilingual, onProgress, deferred = []) {
         if (!window.PDFLib) throw new Error('la librería pdf-lib no está disponible');
         const { PDFDocument, StandardFonts, rgb } = PDFLib;
 
@@ -3722,7 +3722,8 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         for (let p = 0; p < total; p++) {
             const page = pagesAll[p];
             if (page.getRotation().angle % 360 !== 0) {
-                throw new Error('tiene páginas rotadas (no soportado en modo diseño)');
+                deferred.push({ page: p + 1, reason: 'Página rotada: se conserva el original', text: ((transPages[p] || {}).paragraphs || []).join('\n\n') });
+                continue;
             }
             const W = page.getSize().width;
 
@@ -3795,6 +3796,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                     continue;
                 }
                 if (!tRaw && !oRaw) continue;
+                if (!bilingual && (!tRaw || tRaw === oRaw)) continue;
 
                 const orig = trSanitizeWinAnsi(oRaw);
                 const trans = trSanitizeWinAnsi(tRaw) || orig;
@@ -3808,11 +3810,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 // 1) tapar el texto original con el color de fondo real
                 const bg = bgColor(geo);
 
-                // --- Bloques OCR: tapa FINA y ajustada al texto real ---
-                // El fondo se dibuja SOLO del tamaño exacto del bloque de
-                // traducción que se va a escribir (calculado tras re-lienar),
-                // nunca un rectángulo genérico alrededor del bloque original:
-                // así no vuelven las «zonas exageradas» sobre el diseño.
+                // OCR: fit before drawing; preserve the original when it cannot fit.
                 if (geo.ocr) {
                     const boxWo = geo.x1 - geo.x0;
                     const fitH = geo.yTop - geo.yBot;
@@ -3829,8 +3827,10 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                         if (blockH <= fitH || fsOcr <= minSize) break;
                         fsOcr = Math.max(minSize, fsOcr * 0.95);
                     }
-                    if (blockH > fitH || lnOcr.some(ln => fontO.widthOfTextAtSize(ln, fsOcr) > boxWo)) {
-                        throw new Error('la traducción OCR no cabe con letra legible en la página ' + (p + 1));
+                    if (blockH > fitH || lnOcr.some(ln => fontO.widthOfTextAtSize(ln, fsOcr) > boxWo) ||
+                        lnOr.some(ln => F.reg.widthOfTextAtSize(ln, fsOr) > boxWo)) {
+                        deferred.push({ page: p + 1, reason: 'El bloque no cabe con letra legible', text: trans });
+                        continue; // No mask or text has been drawn: keep the original region.
                     }
                     // Mask the entire source area, even when the translation is shorter.
                     page.drawRectangle({ x: geo.x0 - 0.5, y: geo.yBot - 0.5,
@@ -4182,14 +4182,11 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
         const bilingual = bilingualCheckTr.checked;
         const slSetting = sourceLangSelect.value;
         const tl = targetLangSelect.value;
-        if (fmt === 'pdf-layout' && TR_LAYOUT_LANGS.indexOf(tl) === -1) {
-            showToast('El modo «PDF diseño» solo soporta alfabetos latinos como destino; se generará PDF reformateado', 'error');
-            fmt = 'pdf';
-        }
         const failures = [];
         const t0All = Date.now();
         let totalPagesDone = 0;
         let totalWordsDone = 0;
+        let layoutDeferredCount = 0;
 
         const fmtEta = (s) => {
             s = Math.max(0, Math.round(s));
@@ -4204,6 +4201,9 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 const base = (frac, msg) => setTrProgress(((i + frac) / total) * 100, msg);
 
                 try {
+                    if (fmt === 'pdf-layout' && TR_LAYOUT_LANGS.indexOf(tl) === -1) {
+                        throw new Error('PDF diseño no admite este alfabeto de destino. Selecciona explícitamente PDF reformateado u otro formato.');
+                    }
                     // 1) Obtener el texto del PDF (reutiliza el análisis previo)
                     let doc = item.doc;
                     if (doc && doc.hasText) {
@@ -4301,15 +4301,16 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                         blob = await trBuildDocx(outOrig, outTrans, bilingual);
                         ext = 'docx';
                     } else if (fmt === 'pdf-layout') {
-                        try {
-                            blob = await trBuildPdfLayout(item.file, outOrig, outTrans, bilingual, (f) =>
-                                base(0.9 + f * 0.08, 'Reconstruyendo el diseño — ' + item.file.name));
-                            ext = 'pdf';
-                        } catch (layoutErr) {
-                            console.warn('pdf-layout → fallback reformateado:', layoutErr);
-                            showToast('«' + item.file.name + '»: ' + layoutErr.message + '; se genera PDF reformateado', 'error');
-                            blob = await trBuildPdf(outOrig, outTrans, bilingual);
-                            ext = 'pdf';
+                        const deferred = [];
+                        blob = await trBuildPdfLayout(item.file, outOrig, outTrans, bilingual, (f) =>
+                            base(0.9 + f * 0.08, 'Reconstruyendo el diseño — ' + item.file.name), deferred);
+                        ext = 'pdf';
+                        if (deferred.length) {
+                            const report = 'Se conserva el diseño original. Estos bloques no se sustituyeron; su traducción aparece a continuación.\n\n' +
+                                deferred.map(d => 'Página ' + d.page + ' — ' + d.reason + '\n' + d.text).join('\n\n');
+                            trResults.push({ blob: new Blob([report], { type: 'text/plain;charset=utf-8' }),
+                                name: item.file.name.replace(/\.pdf$/i, '') + '_trad_' + tl + '_bloques_pendientes.txt' });
+                            layoutDeferredCount += deferred.length;
                         }
                     } else if (fmt === 'pdf') {
                         blob = await trBuildPdf(outOrig, outTrans, bilingual);
@@ -4342,6 +4343,7 @@ function preprocessImageForPdf(file, maxLongSide, quality) {
                 resultsSectionTr.style.display = 'block';
                 let meta = trResults.length + ' archivo' + (trResults.length !== 1 ? 's' : '') + ' · ' + totalPagesDone + ' páginas · ' + fmtInt(totalWordsDone) + ' palabras · ' + durAll;
                 if (trStopReason) meta += ' · PARCIAL (' + (trStopReason === 'cancelado' ? 'detenido' : 'servicio') + ')';
+                if (layoutDeferredCount) meta += ' · ' + layoutDeferredCount + ' bloques conservados en original (traducción en TXT adjunto)';
                 resultsMetaTr.textContent = meta;
                 renderResultsList(filesListTr, trResults, '#10b981', globeIconSvg());
                 if (trStopReason === 'cancelado') {
