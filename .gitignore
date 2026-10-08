@@ -1,4 +1,5 @@
 .DS_Store
-*.lognode_modules/
+*.log
+node_modules/
 test-results/
 playwright-report/
