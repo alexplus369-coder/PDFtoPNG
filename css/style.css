@@ -17,6 +17,19 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
+.comic-drop-zone { display: block; width: 100%; color: inherit; font: inherit; }
+.comic-drop-zone .drop-title, .comic-drop-zone .drop-hint { display: block; }
+.comic-drop-zone:disabled { cursor: wait; opacity: 0.65; }
+.comic-drop-zone:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+.comic-help, .comic-status { margin: 0.75rem 0; color: var(--text-secondary); font-size: 0.875rem; }
+.comic-status { min-height: 1.5em; overflow-wrap: anywhere; }
+.comic-error { color: var(--error); }
+.comic-file-meta { display: grid; min-width: 0; }
+.comic-file-meta .comic-help { margin: 0; }
+.comic-page-name { padding: 0.5rem 1rem 0; font-size: 0.8rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+
 body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background: var(--bg);

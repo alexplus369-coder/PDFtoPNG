@@ -1,2 +1,4 @@
 .DS_Store
-*.log
+*.lognode_modules/
+test-results/
+playwright-report/

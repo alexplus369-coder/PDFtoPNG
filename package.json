@@ -1,0 +1,22 @@
+{
+  "name": "pdf-tools-browser",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Client-side PDF, image and comic archive tools",
+  "scripts": {
+    "check": "node --check js/app.js && node --check js/comics.js && node --check js/comics-ui.js && node --check api/translate.js",
+    "test": "npm run check && node tests/ocr.cjs && node tests/layout.cjs && node tests/comics.cjs",
+    "test:browser": "node tests/comics.browser.cjs",
+    "vendor:archive": "node scripts/vendor-archive.cjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "file-saver": "2.0.5",
+    "jszip": "3.10.1",
+    "libarchive.js": "2.0.2",
+    "pdf-lib": "1.17.1",
+    "playwright": "1.62.1"
+  }
+}
