@@ -1,5 +1,53 @@
 # 📄 PDF Tools (100% Client-Side)
 
+## Cómics CBR/CBZ — octubre 2026
+
+La pestaña **CBR/CBZ** permite abrir un cómic y elegir:
+
+- **PDF**: tamaño original de cada imagen, A4 o Carta, con orientación automática, vertical u horizontal. Las páginas conservan sus proporciones, sin recortes.
+- **ZIP de imágenes**: conservar los archivos originales sin pérdida o convertirlos a PNG/JPEG. Las imágenes se numeran `pagina-001`, `pagina-002`, etc.
+- **Descarga individual** de las imágenes originales desde el resultado.
+- **Orden natural** de carpetas y páginas (`1, 2, 10`), omitiendo metadatos, archivos ocultos y `__MACOSX`.
+- **Cancelar y reintentar**, con progreso de extracción y conversión.
+
+**CBZ** se abre con JSZip; **CBR/RAR4 y RAR5** se lee con libarchive.js y WebAssembly, bajo demanda. El lector RAR se incluye en `vendor/libarchive/`, sin subir el cómic a ningún servidor y sin un servicio de pago. Se detecta el contenido real, incluso si un ZIP tiene extensión `.cbr`.
+
+PNG/JPEG se conservan directamente al generar PDF con la opción «Originales». Otros formatos se convierten a PNG para incorporarlos al PDF. La conversión PNG/JPEG de imágenes animadas utiliza un fotograma; un ZIP de originales conserva el archivo completo. El tamaño PDF original se calcula a **96 ppp**, independientemente para cada página; dimensiones superiores a 14 400 puntos se reducen proporcionalmente.
+
+Límites para contener el uso de memoria: **256 MB** por archivo, **512 MB** de imágenes descomprimidas y **2 000 páginas**. Las imágenes convertidas mediante canvas no pueden superar **40 megapíxeles**. No se admiten cómics con contraseña, archivos divididos en varios volúmenes ni formatos de compresión no soportados por el lector. PNG, JPEG, WebP, GIF, BMP y AVIF dependen del soporte de imagen del navegador.
+
+### Iniciar el sitio en Windows
+
+Desde la carpeta del proyecto, ejecuta:
+
+```powershell
+python -m http.server 8000
+```
+
+Abre **http://localhost:8000** y entra en **CBR/CBZ**. También funciona en GitHub Pages por HTTPS. CBR necesita HTTP/HTTPS: abrir `index.html` directamente como `file://` no permite cargar sus módulos y worker. No hace falta instalar Node ni npm para usar el conversor.
+
+### Pruebas y archivos faltantes
+
+Las pruebas forman parte del repositorio: `tests/ocr.cjs`, `tests/layout.cjs` y `tests/comics.cjs`. Con **Node 22 o superior**, instala sus dependencias y ejecútalas:
+
+```powershell
+npm ci
+npm test
+```
+
+`npm test` comprueba la sintaxis y ejecuta las pruebas OCR, de conservación del diseño y de cómics. `pdf-lib` se instala automáticamente para la prueba de diseño; ya no necesitas configurar `NODE_PATH`.
+
+Si aparece `Cannot find module '...tests/ocr.cjs'` o `...tests/layout.cjs`, **falta ese archivo en tu copia**, no es un fallo del conversor ni de la versión de Node. Actualiza la rama que contiene los cambios con `git fetch origin` y `git pull --ff-only`, o descarga de nuevo el repositorio completo. `git push` envía tus commits a GitHub; **no descarga archivos ni crea commits**. `Everything up-to-date` significa que no hay commits nuevos en esa rama para enviar.
+
+Prueba adicional del flujo completo en Chromium:
+
+```powershell
+npx playwright install chromium
+npm run test:browser
+```
+
+El test de navegador abre CBZ y CBR reales RAR4/RAR5 generados con páginas de prueba, descarga PDF e imágenes y valida sus contenidos, orden, tamaños, cancelación, recuperación de errores y vista móvil. Usa las bibliotecas reales de PDF/ZIP/descarga; aísla las herramientas CDN ajenas al modo cómic. No ejecuta los proveedores externos de traducción. GitHub Actions ejecuta las pruebas de regresión en Windows/Linux y Node 22/24, además del test de navegador.
+
 ## Corrección OCR — septiembre 2026
 
 Esta revisión sustituye las reglas anteriores de filtrado y ajuste OCR:
@@ -11,7 +59,7 @@ Esta revisión sustituye las reglas anteriores de filtrado y ajuste OCR:
 - Los reintentos parten del texto digital, evitando reutilizar OCR de otro idioma o modo.
 - Validación: sintaxis JavaScript y pruebas de frases completas, columnas separadas, siglas, confianza y coordenadas. Pendiente prueba integral en navegador con los servicios externos.
 
-El ZIP incluye la estructura correcta: `index.html`, `js/app.js`, `css/style.css` y `api/translate.js`.
+Mantén la estructura completa al descargar o publicar: `index.html`, `js/`, `css/`, `api/`, `vendor/`, `tests/`, `scripts/`, `package.json` y `package-lock.json`. Copiar solo `js/app.js` no incorpora los demás archivos.
 
 
 
@@ -24,6 +72,7 @@ Conversor de PDF a PNG/JPEG que funciona completamente en el navegador.
 - 🖼️ **PNG o JPEG** con calidad ajustable
 - 📐 **Múltiples resoluciones** (1× a 4×)
 - 📥 **Descarga individual** o en **ZIP**
+- 📚 **CBR/CBZ a PDF o imágenes**, con orden natural y lector RAR local
 - 🌐 **Traductor de PDF** — 21 idiomas, salida en Word/PDF/TXT y modo bilingüe
 - 📱 **Responsive** — funciona en móvil y escritorio
 - 🚀 **GitHub Pages ready** — solo archivos estáticos
@@ -117,8 +166,7 @@ Con el proxy activo ganas un proveedor extra al inicio de la cadena, con lotes d
 
 ## 🛠️ Uso local
 
-Simplemente abre `index.html` en tu navegador.  
-No necesitas instalar nada ni levantar un servidor.
+Sirve la carpeta con `python -m http.server 8000` y abre `http://localhost:8000`. No necesitas Node/npm para usar el sitio. Abrir `index.html` directamente puede funcionar para algunas herramientas, pero **CBR necesita un servidor HTTP local o HTTPS**.
 
 > **Nota:** Por políticas de CORS, algunos navegadores pueden requerir un servidor local para que el worker de PDF.js cargue correctamente. Si es tu caso:
 > ```bash
@@ -129,6 +177,7 @@ No necesitas instalar nada ni levantar un servidor.
 
 - [PDF.js](https://mozilla.github.io/pdf.js/) — renderizado y lectura de PDF
 - [JSZip](https://stuk.github.io/jszip/) — generación de archivos ZIP
+- [libarchive.js](https://github.com/nika-begiashvili/libarchivejs) — lectura RAR4/RAR5 en WebAssembly, incluida en `vendor/` y cargada bajo demanda
 - [FileSaver.js](https://github.com/eligrey/FileSaver.js/) — descarga de archivos
 - [jsPDF](https://github.com/parallax/jsPDF) — generación de PDF
 - [pdf-lib](https://pdf-lib.js.org/) — manipulación de PDF

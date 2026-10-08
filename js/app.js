@@ -47,6 +47,7 @@
     const modePanels = {
         pdf2img: $('#pdf2imgPanel'),
         img2pdf: $('#img2pdfPanel'),
+        comics: $('#comicsPanel'),
         mergepdf: $('#mergePdfPanel'),
         splitpdf: $('#splitPdfPanel'),
         renamefiles: $('#renameFilesPanel'),

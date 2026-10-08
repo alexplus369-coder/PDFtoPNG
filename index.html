@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Conversor PDF ↔ Imagen</title>
+    <title>PDF Tools · PDF, imágenes y cómics CBR/CBZ</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=3">
+    <link rel="stylesheet" href="css/style.css?v=4">
 <base target="_blank">
 </head>
 <body>
@@ -40,6 +40,12 @@
                     <polyline points="21 15 16 10 5 21"/>
                 </svg>
                 Imagen a PDF
+            </button>
+            <button class="mode-btn" data-mode="comics">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                    <path d="M4 3h16v18H4zM12 3v18M7 7h2M15 7h2M7 11h2M15 11h2"/>
+                </svg>
+                CBR/CBZ
             </button>
             <button class="mode-btn" data-mode="mergepdf">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
@@ -89,6 +95,91 @@
         </div>
 
         <main>
+            <!-- ==================== MODO: CBR / CBZ ==================== -->
+            <div id="comicsPanel" style="display:none;">
+                <section class="upload-section">
+                    <button class="drop-zone comic-drop-zone" id="comicDropZone" type="button">
+                        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M4 3h16v18H4zM12 3v18M7 7h2M15 7h2M7 11h2M15 11h2"/>
+                        </svg>
+                        <span class="drop-title">Arrastra un cómic CBR o CBZ aquí</span>
+                        <span class="drop-hint">o haz clic para elegirlo · hasta 256 MB</span>
+                    </button>
+                    <input type="file" id="comicFileInput" accept=".cbz,.cbr" hidden>
+                    <p class="comic-help">Convierte a PDF o descarga las imágenes en ZIP. Los archivos se procesan en tu dispositivo. Para CBR usa este sitio por HTTP/HTTPS, también con un servidor local.</p>
+                    <p class="comic-status" id="comicStatus" role="status" aria-live="polite"></p>
+                </section>
+                <section class="options-section" id="comicOptions" hidden>
+                    <div class="file-bar">
+                        <div class="comic-file-meta">
+                            <span class="file-name" id="comicFileName"></span>
+                            <span class="comic-help" id="comicFileMeta"></span>
+                        </div>
+                        <button class="btn-ghost" id="comicReset" type="button">Quitar</button>
+                    </div>
+                    <div class="settings-grid">
+                        <div class="field">
+                            <label for="comicOutput">Salida</label>
+                            <select id="comicOutput">
+                                <option value="pdf">PDF</option>
+                                <option value="images">ZIP de imágenes</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="comicImageFormat">Formato de las imágenes</label>
+                            <select id="comicImageFormat">
+                                <option value="original">Originales (sin pérdida)</option>
+                                <option value="png">PNG</option>
+                                <option value="jpeg">JPEG (menor peso)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="comicQuality">Calidad JPEG</label>
+                            <div class="range-wrap">
+                                <input id="comicQuality" type="range" min="10" max="100" value="90">
+                                <span class="range-value" id="comicQualityValue">Sin pérdida</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-grid" id="comicPdfSettings">
+                        <div class="field">
+                            <label for="comicPageSize">Tamaño de página PDF</label>
+                            <select id="comicPageSize">
+                                <option value="original">Original (según cada imagen)</option>
+                                <option value="a4">A4</option>
+                                <option value="letter">Carta</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="comicOrientation">Orientación</label>
+                            <select id="comicOrientation">
+                                <option value="auto">Según cada imagen</option>
+                                <option value="portrait">Vertical</option>
+                                <option value="landscape">Horizontal</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="comic-help">PDF conserva directamente PNG/JPEG; los demás formatos se convierten a PNG. PNG/JPEG usa el fotograma visible de las imágenes animadas. El tamaño original se calcula a 96 ppp; cada página conserva sus proporciones.</p>
+                    <div class="actions"><button class="btn-primary" id="comicConvert" type="button">Generar PDF</button></div>
+                </section>
+                <section class="progress-section" id="comicProgress" hidden>
+                    <div class="progress-card">
+                        <div class="progress-header">
+                            <span class="progress-title" id="comicProgressTitle">Leyendo el cómic…</span>
+                            <span class="progress-percent" id="comicProgressPercent">0%</span>
+                        </div>
+                        <div class="progress-track"><div class="progress-fill" id="comicProgressFill" style="width:0%"></div></div>
+                        <button class="btn-ghost" id="comicCancel" type="button">Cancelar</button>
+                    </div>
+                </section>
+                <section class="results-section" id="comicResults" hidden>
+                    <div class="results-toolbar">
+                        <div class="results-info"><h2>Cómic convertido</h2><p id="comicResultMeta"></p></div>
+                        <button class="btn-secondary" id="comicDownload" type="button">Descargar PDF</button>
+                    </div>
+                    <div class="pages-list" id="comicPages"></div>
+                </section>
+            </div>
             <!-- ==================== MODO: PDF → IMAGEN ==================== -->
             <div id="pdf2imgPanel">
                 <section class="upload-section" id="uploadSectionPdf">
@@ -1104,6 +1195,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <script src="js/app.js?v=10"></script>
+    <script src="js/comics.js?v=1"></script>
+    <script src="js/app.js?v=11"></script>
+    <script src="js/comics-ui.js?v=1"></script>
 </body>
 </html>
